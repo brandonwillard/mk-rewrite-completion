@@ -1,0 +1,247 @@
+%
+% Basic math commands
+%
+% brandonwillard@gmail.com
+% (some material originally borrowed from Thomas Minka)
+%
+\RequirePackage{mathtools}
+
+\newtheorem{Exa}{Example}
+
+%\usepackage{xifthen}
+\let\D\relax
+\DeclareMathOperator*{\D}{D}
+\let\H\relax
+\DeclareMathOperator*{\H}{H}
+\DeclareMathOperator*{\prox}{prox}
+%\newcommand{\prox}[2] {
+%  \ensuremath{
+%    \operatornamewithlimits{prox}_{#1}\ifthenelse{\equal{#2}{}}{}{\left(#2\right)}
+%  }
+%}
+\newcommand*{\moreau}[2]{
+  \ensuremath{
+    {#2}^{
+    \ifx&#1&\empty 1 \else #1 \fi
+    }
+    %{#2}^{\ifthenelse{\equal{#1}{}}{1}{#1}}
+  }
+}
+
+\newcommand*{\jac}[1]{
+  \ensuremath{ \operatornamewithlimits{J}_{#1}
+  }
+}
+
+
+\DeclareMathOperator{\dom}{dom}
+\newcommand{\var}{{\rm var}}
+\newcommand{\Tr}{^{\rm T}}
+\newcommand{\rmlog}{\rm log}
+\newcommand{\vtrans}[2]{{#1}^{(#2)}}
+\newcommand{\kron}{\otimes}
+\newcommand{\schur}[2]{({#1} | {#2})}
+\newcommand{\schurdet}[2]{\left| ({#1} | {#2}) \right|}
+\newcommand{\had}{\circ}
+\DeclareMathOperator{\Diag}{Diag}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\invdiag}{\diag^{-1}}
+\DeclareMathOperator{\rank}{rank}
+\DeclareMathOperator{\nullsp}{null}
+\DeclareMathOperator{\tr}{tr}
+\renewcommand{\vec}{\operatorname{vec}}
+\DeclareMathOperator{\vech}{vech}
+\renewcommand{\det}[1]{\left| #1 \right|}
+\newcommand{\pdet}[1]{\left| #1 \right|_{+}}
+\newcommand{\pinv}[1]{#1^{+}}
+\DeclareMathOperator{\erf}{erf}
+\newcommand{\hypergeom}[2]{\operatorname{{}_{#1}F_{#2}}}
+
+% boldface characters
+\renewcommand{\a}{{\bf a}}
+\renewcommand{\b}{{\bf b}}
+\renewcommand{\c}{{\bf c}}
+\renewcommand{\d}{{\rm d}}  % for derivatives
+\newcommand{\e}{{\bf e}}
+\newcommand{\f}{{\bf f}}
+\newcommand{\g}{{\bf g}}
+\newcommand{\h}{{\bf h}}
+%\newcommand{\k}{{\bf k}}
+% in Latex2e this must be renewcommand
+\renewcommand{\k}{{\bf k}}
+\newcommand{\m}{{\bf m}}
+\newcommand{\n}{{\bf n}}
+\renewcommand{\o}{{\bf o}}
+\newcommand{\p}{{\bf p}}
+%\newcommand{\q}{{\bf q}}
+\renewcommand{\r}{{\bf r}}
+\newcommand{\s}{{\bf s}}
+\renewcommand{\t}{{\bf t}}
+\renewcommand{\u}{{\bf u}}
+\renewcommand{\v}{{\bf v}}
+\newcommand{\w}{{\bf w}}
+\newcommand{\x}{{\bf x}}
+\newcommand{\y}{{\bf y}}
+%\newcommand{\z}{{\bf z}}
+\newcommand{\A}{{\bf A}}
+\newcommand{\B}{{\bf B}}
+\newcommand{\C}{{\bf C}}
+%\newcommand{\D}{{\bf D}}
+\newcommand{\E}{{\bf E}}
+\newcommand{\F}{{\bf F}}
+\newcommand{\G}{{\bf G}}
+%\renewcommand{\H}{{\bf H}}
+\newcommand{\I}{{\bf I}}
+\newcommand{\J}{{\bf J}}
+\newcommand{\K}{{\bf K}}
+%\renewcommand{\L}{{\bf L}}
+\newcommand{\M}{{\bf M}}
+\newcommand{\Nor}{{\cal N}}  % for normal density
+%\newcommand{\N}{{\bf N}}
+\renewcommand{\O}{{\bf O}}
+\renewcommand{\P}{{\bf P}}
+\newcommand{\Q}{{\bf Q}}
+\newcommand{\R}{{\bf R}}
+\renewcommand{\S}{{\bf S}}
+\newcommand{\T}{{\bf T}}
+\newcommand{\U}{{\bf U}}
+\newcommand{\V}{{\bf V}}
+\newcommand{\W}{{\bf W}}
+\newcommand{\X}{{\bf X}}
+\newcommand{\Y}{{\bf Y}}
+\newcommand{\Z}{{\bf Z}}
+
+\renewcommand{\Re}{{\mathbb{R}}}
+
+% this is for latex 2.09
+% unfortunately, the result is slanted - use Latex2e instead
+%\newcommand{\bfLambda}{\mbox{\boldmath$\Lambda$}}
+% this is for Latex2e
+\newcommand{\bfLambda}{\boldsymbol{\Lambda}}
+
+% Yuan Qi's boldsymbol
+\newcommand{\bsigma}{\boldsymbol{\sigma}}
+\newcommand{\balpha}{\boldsymbol{\alpha}}
+\newcommand{\bpsi}{\boldsymbol{\psi}}
+\newcommand{\bphi}{\boldsymbol{\phi}}
+\newcommand{\bbeta}{\boldsymbol{\beta}}
+%\newcommand{\Beta}{\boldsymbol{\eta}}
+\newcommand{\btau}{\boldsymbol{\tau}}
+\newcommand{\bvarphi}{\boldsymbol{\varphi}}
+\newcommand{\bzeta}{\boldsymbol{\zeta}}
+\newcommand{\bnabla}{\boldsymbol{\nabla}}
+\newcommand{\blambda}{\boldsymbol{\lambda}}
+\newcommand{\bLambda}{\mathbf{\Lambda}}
+
+\newcommand{\btheta}{\boldsymbol{\theta}}
+\newcommand{\bpi}{\boldsymbol{\pi}}
+\newcommand{\bPi}{\boldsymbol{\Pi}}
+\newcommand{\bxi}{\boldsymbol{\xi}}
+\newcommand{\bSigma}{\boldsymbol{\Sigma}}
+
+\newcommand{\bgamma}{\mathbf{\gamma}}
+\newcommand{\bGamma}{\mathbf{\Gamma}}
+
+\newcommand{\bmu}{\boldsymbol{\mu}}
+\newcommand{\bnu}{\boldsymbol{\nu}}
+\newcommand{\bPsi}{\mathbf{\Psi}}
+\newcommand{\bepsilon}{\boldsymbol{\epsilon}}
+\newcommand{\bOmega}{\boldsymbol{\Omega}}
+
+\newcommand{\1}{{\bf 1}}
+\newcommand{\0}{{\bf 0}}
+
+%\newcommand{\comment}[1]{}
+
+\newcommand{\bs}{\backslash}
+\newcommand{\ben}{\begin{enumerate}}
+\newcommand{\een}{\end{enumerate}}
+\newcommand{\beq}{\begin{equation}}
+\newcommand{\eeq}{\end{equation}}
+
+\newcommand{\notS}{{\backslash S}}
+\newcommand{\nots}{{\backslash s}}
+\newcommand{\noti}{{\backslash i}}
+\newcommand{\notj}{{\backslash j}}
+\newcommand{\nott}{\backslash t}
+\newcommand{\notone}{{\backslash 1}}
+\newcommand{\nottp}{\backslash t+1}
+% \newcommand{\notz}{\backslash z}
+
+\newcommand{\notk}{{^{\backslash k}}}
+%\newcommand{\noti}{{^{\backslash i}}}
+\newcommand{\notij}{{^{\backslash i,j}}}
+\newcommand{\notg}{{^{\backslash g}}}
+\newcommand{\wnoti}{{_{\w}^{\backslash i}}}
+\newcommand{\wnotg}{{_{\w}^{\backslash g}}}
+\newcommand{\vnotij}{{_{\v}^{\backslash i,j}}}
+\newcommand{\vnotg}{{_{\v}^{\backslash g}}}
+\newcommand{\half}{\frac{1}{2}}
+\newcommand{\quart}{\frac{1}{4}}
+\newcommand{\msgb}{m_{t \leftarrow t+1}}
+\newcommand{\msgf}{m_{t \rightarrow t+1}}
+\newcommand{\msgfp}{m_{t-1 \rightarrow t}}
+
+\newcommand{\proj}[1]{\operatorname{proj}\negmedspace\left[#1\right]}
+\DeclareMathOperator*{\argmin}{argmin}
+\DeclareMathOperator*{\argmax}{argmax}
+
+\DeclareMathOperator{\dif}{d}
+\DeclarePairedDelimiter{\abs}{\lvert}{\rvert}
+\DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
+
+\DeclareMathOperator{\N}{N}
+
+\newcommand{\Rbar}{ \overline{\R} }
+\newcommand{\sgn}{\mathop{\mathrm{sgn}}}
+
+\newcommand{\vnorm}[1]{\left|\left|#1\right|\right|}
+\newcommand{\enorm}[1]{\Vert #1 \Vert_2}
+
+%\newcommand{\norm}{\mathcal{N}}
+\newcommand{\cX}{\mathcal{X}}
+\newcommand{\cZ}{\mathcal{Z}}
+\newcommand{\cL}{\mathcal{L}}
+\newcommand{\cU}{\mathcal{U}}
+\newcommand{\cW}{\mathcal{W}}
+\newcommand{\cK}{\mathcal{K}}
+
+\newcommand{\tN}{\tilde{N}}
+\newcommand{\tW}{\tilde{W}}
+\newcommand{\tw}{\tilde{w}}
+\newcommand{\tf}{\tilde{f}}
+\newcommand{\tF}{\tilde{F}}
+
+\newcommand{\bx}{{\bf x}}
+\newcommand{\ba}{{\bf a}}
+\newcommand{\bb}{{\bf b}}
+\newcommand{\bc}{{\bf c}}
+\newcommand{\bd}{{\bf d}}
+\newcommand{\bX}{{\bf X}}
+\newcommand{\by}{{\bf y}}
+\newcommand{\IG}{\mathcal{IG}}
+\newcommand{\dd}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\lhat}[1][i]{\hat\lambda_{#1}^{-1(g)}}
+\newcommand{\what}[1][j]{\hat\omega_{#1}^{-1(g)}}
+\newcommand{\bone}{{\bf 1}}
+\newcommand{\Li}{\hat\Lambda^{-1(g)}}
+\newcommand{\Oi}{\hat\Omega^{-1(g)}}
+\newcommand{\iid}{\stackrel{\mathrm{iid}}{\sim}}
+\newcommand{\iidp}{\stackrel{\mathrm{P}}{=}}
+\newcommand{\iidd}{\stackrel{\mathrm{D}}{=}}
+% NOTE: requires mathtools package
+\newcommand{\defeq}{\coloneqq}
+
+%\newtheorem{theorem}{\bf Theorem}
+%\newtheorem{Proof}{Proof}
+%\newtheorem{Def}{Definition}
+%\numberwithin{Def}{section}
+%\newtheorem{remark}{\bf Remark}
+%\newtheorem{Qes}{Question}
+%\newtheorem{proposition}{Proposition}
+%\newtheorem{lemma}{\bf Lemma}
+%\newtheorem{Cor}{\bf Corollary}
+%\numberwithin{Cor}{section}
+%\newtheorem{Eq}{Equation}[section]
+
+

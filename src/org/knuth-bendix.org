@@ -1,0 +1,111 @@
+#+TITLE: Knuth-Bendix Completion in miniKanren
+#+AUTHOR: Brandon T. Willard
+#+DATE: 2018-03-28
+#+EMAIL: brandonwillard@gmail.com
+
+#+STARTUP: hideblocks indent hidestars
+#+OPTIONS: author:t date:t ^:nil toc:nil title:t tex:t d:results html-preamble:t
+#+SELECT_TAGS: export
+#+EXCLUDE_TAGS: noexport
+
+#+PROPERTY: header-args :eval never :exports both :results output drawer replace
+#+PROPERTY: header-args+ :session mk-rewrites
+
+#+SETUPFILE: latex-setup.org
+
+#+BEGIN_abstract
+An investigation into the use of the Knuth-Bendix completion algorithm in
+miniKanren.
+#+END_abstract
+
+#+BEGIN_SRC python :eval yes :exports none :results silent
+(load "~/projects/code/scm/miniKanren/mk.scm")
+#+END_SRC
+
+* Introduction
+
+The Knuth-Bendix algorithm attempts to complete a set of rewrite rules,
+\(\mathcal{R}\), for a set of terms \(\mathcal{T}\left(\mathcal{F},
+\mathcal{V}\right)\) derived from a set of function symbols \(\mathcal{F}\) and
+variables \(\mathcal{V}\).  These are combined to form a term rewriting system
+\(\left(\mathcal{R}, \mathcal{R}\right)\).
+
+:EXAMPLE:
+An example:
+\begin{align}
+  1 \cdot x &= x
+  \\
+  x^{-1} \cdot x &= 1
+  \\
+  (x \cdot y) \cdot z &= x \cdot (y \cdot z)
+\end{align}
+is completed as
+\begin{align}
+  1 \cdot x &\to x
+  \\
+  x^{-1} \cdot x &\to 1
+  \\
+  (x \cdot y) \cdot z &\to x \cdot (y \cdot z)
+  \\
+  x^{-1} \cdot (x \cdot y) &\to y
+  \\
+  1^{-1} &\to 1
+  \\
+  x \cdot 1 &\to x
+  \\
+  (x^{-1})^{-1} &\to x
+  \\
+  x \cdot x^{-1} &\to 1
+  \\
+  x \cdot (x^{-1} \cdot y) &\to y
+  \\
+  (x \cdot y)^{-1} &\to y^{-1} x^{-1}
+\end{align}
+:END:
+
+:NOTES:
+Some good references:
+ - Middeldorp, Aart, and Mirjana Starcevic. 1991. “A Rewrite Approach to Polynomial Ideal Theory.” Centrum voor Wiskunde en Informatica.
+
+Some links:
+ - Lisp source: https://github.com/moratori/kbcompl/blob/master/src/knuth-bendix.lisp
+ - Prolog source: https://github.com/nick8325/completion/blob/master/completion.pl
+:END:
+
+Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
+from the rewrite rule completion provided by the Knuth-Bendix algorithm.
+
+For instance, src_scheme{conde} constructs like the following specify a set of
+rewrite rules \(\mathcal{R}\):
+#+BEGIN_SRC scheme :eval never :results none :exports src
+(fresh (l r)
+  (conde
+   ((== l X1)
+    (== r Y1))
+   ((== l X2)
+    (== r Y2))
+   ;;...
+   ))
+#+END_SRC
+
+** Critical Pairs
+The algorithm starts with the critical pairs, \({\langle s, t \rangle} \in
+\operatorname{CP}(\mathcal{R})\).
+
+We can determine the critical pairs by finding replacement rules that overlap.
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define-syntax critical-pairs
+  (syntax-rules ()
+    ((_ (conde
+         ((== l x)
+          (== r y))
+         ...))
+     (`((,x ,y)
+        ...)))))
+#+END_SRC
+
+# Local Variables:
+# pyvenv-workon: "knuth-bendix-experiment"
+# geiser-scheme-implementation: 'chez
+# eval: (put 'fresh 'scheme-indent-function 1)
+# End:
