@@ -4,7 +4,7 @@
 #+EMAIL: brandonwillard@gmail.com
 
 #+STARTUP: hideblocks indent hidestars
-#+OPTIONS: author:t date:t ^:nil toc:nil title:t tex:t d:results html-preamble:t
+#+OPTIONS: author:t date:t ^:nil toc:nil title:t tex:t d:(not "logbook" "todo" "notes")
 #+SELECT_TAGS: export
 #+EXCLUDE_TAGS: noexport
 
@@ -12,23 +12,20 @@
 #+PROPERTY: header-args+ :session mk-rewrites
 
 #+SETUPFILE: latex-setup.org
+#+INCLUDE: org-setup.org
 
 #+BEGIN_abstract
 An investigation into the use of the Knuth-Bendix completion algorithm in
 miniKanren.
 #+END_abstract
 
-#+BEGIN_SRC python :eval yes :exports none :results silent
-(load "~/projects/code/scm/miniKanren/mk.scm")
-#+END_SRC
-
 * Introduction
 
-The Knuth-Bendix algorithm attempts to complete a set of rewrite rules,
-\(\mathcal{R}\), for a set of terms \(\mathcal{T}\left(\mathcal{F},
-\mathcal{V}\right)\) derived from a set of function symbols \(\mathcal{F}\) and
-variables \(\mathcal{V}\).  These are combined to form a term rewriting system
-\(\left(\mathcal{R}, \mathcal{R}\right)\).
+The Knuth-Bendix algorithm [[citep:KnuthSimplewordproblems1983]] attempts
+to complete a set of rewrite rules, \(\mathcal{R}\), for a set of terms
+\(\mathcal{T}\left(\mathcal{F}, \mathcal{V}\right)\) derived from a set of
+function symbols \(\mathcal{F}\) and variables \(\mathcal{V}\).  These are
+combined to form a term rewriting system \(\left(\mathcal{R}, \mathcal{R}\right)\).
 
 :EXAMPLE:
 An example:
@@ -63,49 +60,74 @@ is completed as
 \end{align}
 :END:
 
-:NOTES:
-Some good references:
- - Middeldorp, Aart, and Mirjana Starcevic. 1991. “A Rewrite Approach to Polynomial Ideal Theory.” Centrum voor Wiskunde en Informatica.
-
-Some links:
- - Lisp source: https://github.com/moratori/kbcompl/blob/master/src/knuth-bendix.lisp
- - Prolog source: https://github.com/nick8325/completion/blob/master/completion.pl
-:END:
-
+* Rewrite Rules in miniKanren
 Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
 from the rewrite rule completion provided by the Knuth-Bendix algorithm.
 
-For instance, src_scheme{conde} constructs like the following specify a set of
-rewrite rules \(\mathcal{R}\):
+In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
+rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
+following:
 #+BEGIN_SRC scheme :eval never :results none :exports src
 (fresh (l r)
   (conde
-   ((== l X1)
-    (== r Y1))
-   ((== l X2)
-    (== r Y2))
+   ;; l_1 -> r_1
+   ((== l L1)
+    (== r R1))
+   ;; l_2 -> r_2
+   ((== l L2)
+    (== r R2))
    ;;...
    ))
 #+END_SRC
 
-** Critical Pairs
-The algorithm starts with the critical pairs, \({\langle s, t \rangle} \in
-\operatorname{CP}(\mathcal{R})\).
+When the src_scheme{conde} forms are intercepted by a macro, one can parse the
+branches and extract implicit rewrite rules.  This step could be performed in an
+operator specifically for defining rewrite rules, or as a generalized miniKanren
+"compilation" step that reasons about arbitrary forms in the unevaluated
+miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
+potential \(l_i \to r_i\) rules).
 
-We can determine the critical pairs by finding replacement rules that overlap.
 #+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax critical-pairs
+(define-syntax extract-rewrite-rules
   (syntax-rules ()
     ((_ (conde
-         ((== l x)
-          (== r y))
-         ...))
-     (`((,x ,y)
-        ...)))))
+         ((== l x) ...))
+        ;; TODO: Collect `(== l ...)` and `(== r ...)` pairs in
+        ;; branches to form rewrite rules.  Maybe even replace/unique-ify
+        ;; the involved logic variables.
+     (`((,x ,y) ...)))))
 #+END_SRC
+
+
+* Critical Pairs
+The algorithm starts with the critical pairs,
+\({\langle s, t \rangle} \in \operatorname{CP}(\mathcal{R})\).
+
+Following [[citet:BaaderTermrewritingall1999]] Definition 6.2.1,
+#+BEGIN_definition
+For \(l_i \to r_i\), \(i \in \left\{1, 2\right\}\) with
+\(\bigcap_{i \in \left\{1, 2\right\}} \mathcal{Var}\left(l_i, r_i\right) = \emptyset\),
+let \(p \in \mathcal{Pos}\left(l_1\right)\) and \(\theta\) a most general
+unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, then
+\(l_i \to r_i\) determine a *critical pair*
+\({\langle \theta r_1, \left(\theta l_1\right)\left[\theta r_2\right]_p \rangle}\).
+#+END_definition
+
+* Knuth-Bendix
+
+:NOTES:
+Some links:
+ - [[https://github.com/moratori/kbcompl/blob/master/src/knuth-bendix.lisp][example Lisp implementation]]
+ - [[https://github.com/nick8325/completion/blob/master/completion.pl][example Prolog implementation]]
+:END:
+
+
+
+#+BIBLIOGRAPHY: mk-term-rewriting.bib
+#+BIBLIOGRAPHYSTYLE: plainnat
 
 # Local Variables:
 # pyvenv-workon: "knuth-bendix-experiment"
-# geiser-scheme-implementation: 'chez
+# geiser-scheme-implementation: 'racket
 # eval: (put 'fresh 'scheme-indent-function 1)
 # End:
