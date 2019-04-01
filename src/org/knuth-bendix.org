@@ -87,6 +87,18 @@ operator specifically for defining rewrite rules, or as a generalized miniKanren
 miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
 potential \(l_i \to r_i\) rules).
 
+#+NAME: rule-operator
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define-syntax rewrite-rules
+  (syntax-rules (->)
+    ((_ (q ...) (l -> r) ...)
+      ;; TODO: Call a function above that produces the critical pairs.
+      ;; The output should ultimately be a set of "completed"
+      ;; `conde' rewrite rules?
+      `((,l ,r) ...))))
+#+END_SRC
+
+#+NAME: rule-extractor
 #+BEGIN_SRC scheme :eval never :exports none :results none
 (define-syntax extract-rewrite-rules
   (syntax-rules ()
@@ -98,6 +110,76 @@ potential \(l_i \to r_i\) rules).
      (`((,x ,y) ...)))))
 #+END_SRC
 
+:NOTES:
+We might be able to construct relations for critical pairs.
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define reduces
+  (lambda (a b)
+    (conde
+     ((fresh (x)
+        (== a `(+ ,x ,x))
+        (== b `(* 2 ,x))))
+     ((fresh (x)
+        (== a `(exp (log ,x)))
+        (== b x))))))
+
+(define reduceo
+  (lambda (a b)
+    (conde
+     ((fresh (r)
+        (reduces a r)
+        (reduceo r b)))
+     ((reduces a b)))))
+
+(check-equal? (run* (q) (reduces '(* 5 5) q))
+              '())
+(check-equal? (run* (q) (reduceo '(+ 5 5) q))
+              '((* 2 5)))
+(check-equal? (run* (q) (reduceo '(exp (log (+ 5 5))) q))
+              '((+ 5 5) (* 2 5)))
+
+
+(define lapply-anyo
+  (lambda (func l-in l-out)
+    (letrec ((-lapply
+              (lambda (-in -out i-any)
+                (conde
+                 ((fresh (i-car i-cdr o-car o-cdr o-any)
+                    (== -in (cons i-car i-cdr))
+                    (== -out (cons o-car o-cdr))
+                    (conde
+                     ((func i-car o-car)
+                      (== o-any #t))
+                     ((== i-car o-car)
+                      (== o-any i-any)))
+                    (-lapply i-cdr o-cdr o-any)))
+                 ((== -in '())
+                  (== i-any #t)
+                  (== -out -in))))))
+      (-lapply l-in l-out #f))))
+
+
+(check-equal? (run* (q) (lapply-anyo reduceo '() q)) '())
+
+(define graph-applyo
+  (lambda (func g-in g-out)
+    (conde
+     ((fresh (i-rdc)
+        (func g-in i-rdc)
+        (conde
+         ((== i-rdc g-out))
+         ((graph-applyo func i-rdc g-out)))))
+     ((fresh (i-rdc)
+        (lapply-anyo
+         (lambda (a b) (graph-applyo func a b))
+         g-in i-rdc)
+        (conde
+         ((== i-rdc g-out))
+         ((graph-applyo func i-rdc g-out))))))))
+
+
+#+END_SRC
+:END:
 
 * Critical Pairs
 The algorithm starts with the critical pairs,
@@ -113,6 +195,97 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
 \({\langle \theta r_1, \left(\theta l_1\right)\left[\theta r_2\right]_p \rangle}\).
 #+END_definition
 
+#+NAME: compute-critical-pairs
+#+BEGIN_SRC scheme :eval yes :exports none :results none
+(require rackunit)
+(require minikanren)
+
+;; Include un-`provided` core functions.
+(require/expose minikanren/minikanren (unify var var? reify walk*))
+
+;; Compute critical pairs for sub-terms of a compound term graph.
+(define critical-pairs-cons
+  (lambda (l r l2 r2)
+    (cond
+     ((cons? l)
+      (let* ([l-car (car l)]
+             [l-cdr (cdr l)]
+             [θ (if (not (var? l-car))
+                    (unify l-car l2 '())
+                    #f)]
+             [cps (if (eq? θ #f)
+                      '()
+                      (list (cons (walk* r θ)
+                                  (walk* (cons r2 l-cdr) θ))))]
+             [cps (append (for/list ([h (critical-pairs-cons l-car r l2 r2)])
+                            (cons (car h) (cons (cdr h) l-cdr))) cps)]
+             [cps (append (for/list ([t (critical-pairs-cons l-cdr r l2 r2)])
+                            (cons (car t) (cons l-car (cdr t)))) cps)])
+        cps))
+     (#t '()))))
+
+;; Compute critical pairs for an arbitrary term graph.
+(define critical-pairs
+  (lambda (l r l2 r2)
+    (if (var? l)
+        '()
+        (let ([θ (unify l l2 '())]
+              [cps '()])
+          (unless (eq? θ #f)
+            (set! cps (cons `(,(reify r θ) . ,(reify r2 θ)) cps)))
+          (when (cons? l)
+            (set! cps (append (critical-pairs-cons l r l2 r2) cps)))
+          cps))))
+#+END_SRC
+
+A simple example from [[citet:BaaderTermrewritingall1999]] Example 6.2.2:
+#+BEGIN_SRC scheme :eval yes :exports results :results value code
+(let ([x (var 0)]
+      [y (var 1)]
+      [z (var 2)]
+      [x1 (var 3)])
+  (critical-pairs `(f (f ,x ,y) ,z) ; ->
+                  `(f ,x (f ,y ,z))
+                  `(f (i ,x1) ,x1) ; ->
+                  'e))
+#+END_SRC
+
+#+RESULTS:
+#+begin_src scheme
+(((f (i #(3)) (f #(3) #(2))) f e #(2)))
+#+end_src
+
+Now, all rules against each other:
+#+BEGIN_SRC scheme :eval yes :exports results :results value code
+(let* ([x (var 0)]
+       [y (var 1)]
+       [z (var 2)]
+       [x1 (var 3)]
+       ;; Create some test rules.
+       ;; NOTE: Neither rule shares logic vars.
+       [rules `(((f (f ,x ,y) ,z) . ; ->
+                 (f ,x (f ,y ,z)))
+                ((f (i ,x1) ,x1) . ; ->
+                 'e))]
+       ;; The critical pairs
+       [c-pairs '()])
+  ;; Loop through combinations of the rules.
+  (for/list ([r (in-combinations rules 2)])
+    (let* ([rule1 (car r)]
+           [rule2 (cadr r)]
+           [l (car rule1)]
+           [r (cdr rule1)]
+           [l2 (car rule2)]
+           [r2 (cdr rule2)])
+      (set! c-pairs (append (critical-pairs l r l2 r2) c-pairs))))
+  c-pairs)
+#+END_SRC
+
+#+RESULTS:
+#+begin_src scheme
+(((f (i #(3)) (f #(3) #(2))) f (quote e) #(2)))
+#+end_src
+
 * Knuth-Bendix
 
 :NOTES:
@@ -121,13 +294,11 @@ Some links:
  - [[https://github.com/nick8325/completion/blob/master/completion.pl][example Prolog implementation]]
 :END:
 
-
-
-#+BIBLIOGRAPHY: mk-term-rewriting.bib
+#+BIBLIOGRAPHY: ../tex/mk-term-rewriting.bib
 #+BIBLIOGRAPHYSTYLE: plainnat
 
 # Local Variables:
 # pyvenv-workon: "knuth-bendix-experiment"
-# geiser-scheme-implementation: 'racket
+# geiser-scheme-implementation: racket
 # eval: (put 'fresh 'scheme-indent-function 1)
 # End:
