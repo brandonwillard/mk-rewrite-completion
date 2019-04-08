@@ -28,7 +28,7 @@ function symbols \(\mathcal{F}\) and variables \(\mathcal{V}\).  These are
 combined to form a term rewriting system \(\left(\mathcal{R}, \mathcal{R}\right)\).
 
 :EXAMPLE:
-An example:
+An example using the standard group axioms:
 \begin{align}
   1 \cdot x &= x
   \\
@@ -186,6 +186,7 @@ The algorithm starts with the critical pairs,
 \({\langle s, t \rangle} \in \operatorname{CP}(\mathcal{R})\).
 
 Following [[citet:BaaderTermrewritingall1999]] Definition 6.2.1,
+#+ATTR_LATEX: :options [Critical Pairs]
 #+BEGIN_definition
 For \(l_i \to r_i\), \(i \in \left\{1, 2\right\}\) with
 \(\bigcap_{i \in \left\{1, 2\right\}} \mathcal{Var}\left(l_i, r_i\right) = \emptyset\),
@@ -195,19 +196,22 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
 \({\langle \theta r_1, \left(\theta l_1\right)\left[\theta r_2\right]_p \rangle}\).
 #+END_definition
 
-#+NAME: compute-critical-pairs
-#+BEGIN_SRC scheme :eval yes :exports none :results none
+#+NAME: kanren-requires
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
 (require rackunit)
 (require minikanren)
 
 ;; Include un-`provided` core functions.
 (require/expose minikanren/minikanren (unify var var? reify walk*))
+#+END_SRC
 
+#+NAME: critical-pairs-functions
+#+BEGIN_SRC scheme :eval yes :exports none :results none
 ;; Compute critical pairs for sub-terms of a compound term graph.
 (define critical-pairs-cons
   (lambda (l r l2 r2)
     (cond
-     ((cons? l)
+     [(cons? l)
       (let* ([l-car (car l)]
              [l-cdr (cdr l)]
              [θ (if (not (var? l-car))
@@ -221,8 +225,8 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
                             (cons (car h) (cons (cdr h) l-cdr))) cps)]
              [cps (append (for/list ([t (critical-pairs-cons l-cdr r l2 r2)])
                             (cons (car t) (cons l-car (cdr t)))) cps)])
-        cps))
-     (#t '()))))
+        cps)]
+     [else '()])))
 
 ;; Compute critical pairs for an arbitrary term graph.
 (define critical-pairs
@@ -239,6 +243,7 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
 #+END_SRC
 
 A simple example from [[citet:BaaderTermrewritingall1999]] Example 6.2.2:
+#+NAME: critical-pairs-examples
 #+BEGIN_SRC scheme :eval yes :exports results :results value code
 (let ([x (var 0)]
       [y (var 1)]
@@ -250,12 +255,13 @@ A simple example from [[citet:BaaderTermrewritingall1999]] Example 6.2.2:
                   'e))
 #+END_SRC
 
-#+RESULTS:
+#+RESULTS: critical-pairs-examples
 #+begin_src scheme
 (((f (i #(3)) (f #(3) #(2))) f e #(2)))
 #+end_src
 
 Now, all rules against each other:
+#+NAME: more-critical-pairs-examples
 #+BEGIN_SRC scheme :eval yes :exports results :results value code
 (let* ([x (var 0)]
        [y (var 1)]
@@ -270,6 +276,7 @@ Now, all rules against each other:
        ;; The critical pairs
        [c-pairs '()])
   ;; Loop through combinations of the rules.
+  ;; TODO: This loop should be *inside*
   (for/list ([r (in-combinations rules 2)])
     (let* ([rule1 (car r)]
            [rule2 (cadr r)]
@@ -281,18 +288,235 @@ Now, all rules against each other:
   c-pairs)
 #+END_SRC
 
-#+RESULTS:
+#+RESULTS: more-critical-pairs-examples
 #+begin_src scheme
 (((f (i #(3)) (f #(3) #(2))) f (quote e) #(2)))
 #+end_src
 
 * Knuth-Bendix
 
+To start, we consider a basic cardinality-based measure on term-graphs
+[[citep:HarrisonIntroductionlogicautomated2007][Chapter 4.6]].
+
+#+ATTR_LATEX: :options [Term-graph cardinality measure]
+#+NAME: term-graph-measure-based-order
+#+BEGIN_definition
+The order \(s > t\) is given by \(\abs{s} > \abs{t}\) for terms \(s, t \in
+\mathcal{T}\) and cardinality measure \(\abs{s}\).
+#+END_definition
+
+#+NAME: term-size-function
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+(define graph-size
+  (lambda (t)
+    (if (var? t)
+        1
+        (foldl (lambda (x n)
+                 (+ n (graph-size x)))
+               1 (cdr t)))))
+#+END_SRC
+
+#+NAME: term-size-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let ([x (var 0)]
+      [y (var 1)]
+      [z (var 2)])
+  (check-eq? (graph-size x) 1)
+  (check-eq? (graph-size `(f ,x)) 2)
+  (check-eq? (graph-size `(f ,x ,y)) 3)
+  (check-eq? (graph-size `(f (g ,x))) 3)
+  (check-eq? (graph-size `(f (f ,x ,y) ,z)) 5))
+#+END_SRC
+
+#+NAME: term-size-order
+#+BEGIN_SRC scheme :eval yes :exports none :results none
+(define size-gt
+  (lambda (t1 t2)
+    (> (graph-size t1) (graph-size t2))))
+#+END_SRC
+
+We need a *reduction order* for Knuth-Bendix completion.  The standard
+cardinality measure itself will not suffice, since it is not closed under
+substitutions [[citep:BaaderTermrewritingall1999][Example 5.2.2]].
+
+An extension to the cardinality order is the strict reduction order given by
+\(s > t \iff \abs{s} > \abs{t}\), \(s, t \in \mathcal{T}\) such that \(\forall x \in \mathcal{V}\),
+\(\abs{s}_x \geq \abs{t}_x\), where \(\abs{t}_x\) is the number of occurrences
+of \(x\) in \(t\).  However, according to
+[[citet:HarrisonIntroductionlogicautomated2007]], this reduction order is not
+well-suited for algebraic theories.
+
+** Lexicographical Path Order
+Instead, we will use the standard lexicographical path order (LPO)
+[[citep:BaaderTermrewritingall1999][Example 5.4.12]].
+
+First, some helper functions.
+#+NAME: vars-helper
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; Returns all the variables in a term graph.
+(define vars
+  (lambda (x [s (set)])
+    (cond
+     [(pair? x)
+      (set-union (vars (car x))
+                 (vars (cdr x)))]
+     [(var? x)
+      (set-add s x)]
+     [else s])))
+#+END_SRC
+
+#+NAME: vars-helper-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let ([v0 (var 0)]
+      [v1 (var 1)]
+      [v2 (var 2)]
+      [v3 (var 3)]
+      [v4 (var 4)])
+  (check-equal?
+   (vars `(f (g ,v0 x (,v0 ,v2 ,v3)) ,v1 (h (j (k ,v4) ,v3))))
+   (set v1 v3 v0 v4 v2)))
+#+END_SRC
+
+The LPO order will need an operator-symbol measure.  In other words, an
+order--possibly arbitrary--is imposed on function symbols like \(*\), \(f\),
+etc., considered together with their effective arities.
+
+Our implementations roughly follow
+[[citet:HarrisonIntroductionlogicautomated2007][Chapter 4.6]].
+
+#+NAME: op-gt
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; Greater-than comparison of operator symbols against a given
+;; ordering (implied by an ordered list containing all known operators)
+;; and their arities--when applicable.
+(define op-gt
+  (lambda (op-list t1 t2)
+    (cond
+     [(and (symbol? t1) (symbol? t2))
+      (> (length (or (member t1 op-list)
+                     (error 'op-gt "op ~a not found." t1)))
+         (length (or (member t2 op-list)
+                     (error 'op-gt "op ~a not found." t2))))]
+     [(and (list? t1) (list? t2))
+      (let ([t1-rator (car t1)]
+            [t1-rands (cdr t1)]
+            [t2-rator (car t2)]
+            [t2-rands (cdr t2)])
+        (if (eq? t1-rator t2-rator)
+            (> (length t1-rands) (length t2-rands))
+            (> (length (or (member t1-rator op-list)
+                           (error 'op-gt "op ~a not found." t1-rator)))
+               (length (or (member t2-rator op-list)
+                           (error 'op-gt "op ~a not found." t2-rator))))))])))
+#+END_SRC
+
+#+NAME: op-gt-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(check-true (op-gt '(+ e) '(+ 1) '(e)))
+(check-true (op-gt '(e +) '(e) '(+ 1)))
+(check-false (op-gt '(e +) '(+ 1) '(e)))
+(check-true (op-gt '(e +) '(+ 1 2 3) '(+ 1 2)))
+(check-false (op-gt '(e +) '(+ 1 2) '(+ 1 2 3)))
+(check-true (op-gt '(e +) 'e '+))
+(check-false (op-gt '(e +) '+ 'e))
+(check-false (op-gt '(e +) '+ '+))
+#+END_SRC
+
+#+NAME: lex-order
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; Lexicographical extension of an order.
+(define lex-gt
+  (lambda (order t1 t2)
+    (if (and (pair? t1) (pair? t2))
+        (let ([t1-car (car t1)]
+              [t1-cdr (cdr t1)]
+              [t2-car (car t2)]
+              [t2-cdr (cdr t2)])
+          (if (order t1-car t2-car)
+           (eq? (length t1-cdr) (length t2-cdr))
+           (and (eq? t1-car t2-car)
+                (lex-eq order t1-cdr t2-cdr))))
+        #f)))
+#+END_SRC
+
+#+NAME: lex-order-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(check-true (lex-gt eq? '(f) '(f)))
+(check-true (lex-gt eq? '(f g) '(f g)))
+(check-false (lex-gt eq? '(f g) '(f)))
+(check-false (lex-gt eq? '(f) '(f g)))
+#+END_SRC
+
+#+NAME: lpo-orders
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; Lexicographical path order.
+(define lpo-gt
+  (lambda (op-ord t1 t2)
+    ;; Constants are expressed as 0-arity functions--for consistency,
+    ;; so we transform symbols that represent them into S-expressions.
+    (let ([t1 (if (symbol? t1)
+                  (list t1)
+                  t1)]
+          [t2 (if (symbol? t2)
+                  (list t2)
+                  t2)])
+      (cond
+       [(var? t2)
+        (and (not (eq? t1 t2))
+             ;; FIXME: Seems pretty wasteful.  Some state would be good here?
+             (set-member? (vars t1) t2))]
+       ;; TODO: Ugh, just use `match' already!
+       [(and (list? t1) (list? t2))
+        (let ([t1-rator (car t1)]
+              [t2-rator (car t2)]
+              [t1-rands (cdr t1)]
+              [t2-rands (cdr t2)])
+          (or (ormap (lambda (x)
+                       (or (eq? x t2)
+                           (lpo-gt op-ord x t2)))
+                     t1-rands)
+              (and (andmap (curry lpo-gt op-ord t1) t2-rands)
+                   (or (op-ord t1-rator t2-rator)
+                       (and (eq? t1-rator t2-rator)
+                            (lex-gt (curry lpo-gt op-ord) t1-rands t2-rands))))))]
+       [else #f]))))
+
+;; LPO's completion.
+(define lpo-ge
+  (lambda (op-ord t1 t2)
+    (or (eq? t1 t2)
+        (lpo-gt op-ord t1 t2))))
+#+END_SRC
+
+#+NAME: lpo-orders-tests
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; (require debug/repl)
+;; Use `(debug-repl)` and `(resume)'.
+
+(check-false (lpo-gt (curry op-gt '(f g)) `(f) `(f)))
+(check-true (lpo-gt (curry op-gt '(f g)) `(f) `(g)))
+(check-false (lpo-gt (curry op-gt '(f g)) `(g) `(f)))
+(check-false (lpo-gt (curry op-gt '(f g x)) `(f ,(var 0)) `(f x)))
+
+(let ([x (var 0)]
+      [y (var 1)]
+      [z (var 2)]
+      [op-gt (curry op-gt '(i f e))])
+  ;; Tests from Example 5.4.13
+  (check-true (lpo-gt op-gt `(i e) 'e))
+  (check-true (lpo-gt op-gt `(f ,x e) x))
+  (check-true (lpo-gt op-gt `(i (f ,x ,y)) `(f (i ,y) (i ,x))))
+  (check-true (lpo-gt op-gt `(i (f ,x ,y)) `(i ,y)))
+  (check-true (lpo-gt op-gt `(i (f ,x ,y)) `(i ,x)))
+  (check-true (lpo-gt op-gt `(f (f ,x ,y) ,z) `(f ,x (f ,y ,z)))))
+#+END_SRC
+
 :NOTES:
-Some links:
- - [[https://github.com/moratori/kbcompl/blob/master/src/knuth-bendix.lisp][example Lisp implementation]]
- - [[https://github.com/nick8325/completion/blob/master/completion.pl][example Prolog implementation]]
+We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 :END:
+
+* Discussion
+
 
 #+BIBLIOGRAPHY: ../tex/mk-term-rewriting.bib
 #+BIBLIOGRAPHYSTYLE: plainnat
