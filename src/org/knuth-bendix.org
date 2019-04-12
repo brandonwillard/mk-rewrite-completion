@@ -12,7 +12,7 @@
 #+PROPERTY: header-args+ :session mk-rewrites
 
 #+SETUPFILE: latex-setup.org
-#+INCLUDE: org-setup.org
+# #+INCLUDE: org-setup.el
 
 #+BEGIN_abstract
 An investigation into the use of the Knuth-Bendix completion algorithm in
@@ -63,6 +63,15 @@ is completed as
 * Rewrite Rules in miniKanren
 Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
 from the rewrite rule completion provided by the Knuth-Bendix algorithm.
+
+#+NAME: kanren-requires
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(require rackunit)
+(require minikanren)
+
+;; Include un-`provided` core functions.
+(require/expose minikanren/minikanren (unify var var? reify walk*))
+#+END_SRC
 
 In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
 rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
@@ -181,32 +190,144 @@ We might be able to construct relations for critical pairs.
 #+END_SRC
 :END:
 
-* Critical Pairs
-The algorithm starts with the critical pairs,
-\({\langle s, t \rangle} \in \operatorname{CP}(\mathcal{R})\).
+The macros in [[rewrite-macros]] should make it easier to specify a set of rewrite
+rules using the following syntax:
+#+NAME: rewrite-macro-usage
+#+BEGIN_SRC scheme :eval never :exports code :results none
+(rewrite-rules (x y)
+               ((f (g x x) y) -> (g x y))
+               ((g x y) -> x))
+#+END_SRC
 
+Listing [[rewrite-macro-usage]] expands to the following:
+#+NAME: rewrite-macro-expanded
+#+BEGIN_SRC scheme :eval never :exports code :results none
+'(list
+  (let ((xv `((x unquote (var (gensym)))
+              (y unquote (var (gensym))))))
+    (subs-var xv '((f (g x x) y) g x y)))
+  (let ((xv `((x unquote (var (gensym)))
+              (y unquote (var (gensym))))))
+    (subs-var xv '((g x y) . x))))
+#+END_SRC
+
+#+NAME: rewrite-macros
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+(define (subs-var xv v)
+  (match v
+    [(cons h t)
+     (cons (subs-var xv h) (subs-var xv t))]
+    [_
+     (let* ([r-pair (assoc v xv)])
+       (if r-pair
+           (cdr r-pair)
+           v))]))
+
+(define-syntax (rewrite-rules stx)
+  (syntax-case stx (->)
+    [(_ (x ...) (l -> r) ...)
+     #`(list
+        (let ([xv `((x . ,(var (gensym))) ...)])
+          (subs-var xv (quote (l . r)))) ...)]))
+#+END_SRC
+
+#+NAME: rewrite-macros-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(check-true (let ([q (car (rewrite-rules (x y) (x -> x)))])
+              (eq? (car q) (cdr q))))
+#+END_SRC
+
+The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a form.
+src_scheme{normalize} attempts to produce a fixed-point/normalized result through
+repeated application of the rewrite rules.
+#+NAME: rewrite-helper-functions
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+;; Apply a single rewrite rule or `#f`.
+(define rewrite-1
+  (lambda (t lr)
+    (let* ([l (car lr)]
+           [r (cdr lr)]
+           [θ (if (not (var? t))
+                  (unify t l '())
+                  #f)]
+           [t-new (if (eq? θ #f)
+                      #f
+                      (walk* r θ))])
+      t-new)))
+
+;; Apply the first rewrite rule that unifies; return `#f` otherwise.
+(define rewrite
+  (lambda (t rules)
+    (ormap (curry rewrite-1 t) rules)))
+
+;; Apply rewrite rules until a fixed-point is reached.
+(define normalize
+  (lambda (t rules)
+    (cond
+     [(list? t)
+      (let* ([t-car (car t)]
+             [t-cdr (cdr t)]
+             [t-cdr-new (for/list ([a t-cdr])
+                          (normalize a rules))])
+        (if (eq? t-cdr-new #f)
+            t
+            (let* ([t-new (cons t-car t-cdr-new)]
+                   [t-new-new (rewrite t-new rules)])
+              (if (eq? t-new-new #f)
+                  t-new
+                  (normalize t-new-new rules)))))]
+     [else t])))
+#+END_SRC
+
+#+NAME: rewrite-helper-functions-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(check-equal? (rewrite '(f x y)
+                       (let ([q (var 0)]
+                             [w (var 1)])
+                         `(((g ,q ,w) . ,w)
+                           ((i) . 1))))
+              #f)
+(check-equal? (rewrite '(g x (i))
+                       (let ([q (var 0)]
+                             [w (var 1)])
+                         `(((g ,q ,w) . ,w)
+                           ((i) . 1))))
+              '(i))
+
+(check-equal? (normalize '(g (f i) (i))
+                         (let ([q (var 0)]
+                               [w (var 1)]
+                               [z (var 2)])
+                           `(((g ,q ,w) . ,w)
+                             ((f ,z) . ,z)
+                             ((i) . 1))))
+              1)
+(check-equal? (normalize '(g (f (i)) (i))
+                         (let ([q (var 0)]
+                               [w (var 1)]
+                               [z (var 2)])
+                           `(((g ,q ,w) . (+ ,q ,w))
+                             ((f ,z) . ,z)
+                             ((i) . 1))))
+              '(+ 1 1))
+#+END_SRC
+
+* Critical Pairs
 Following [[citet:BaaderTermrewritingall1999]] Definition 6.2.1,
 #+ATTR_LATEX: :options [Critical Pairs]
 #+BEGIN_definition
 For \(l_i \to r_i\), \(i \in \left\{1, 2\right\}\) with
-\(\bigcap_{i \in \left\{1, 2\right\}} \mathcal{Var}\left(l_i, r_i\right) = \emptyset\),
-let \(p \in \mathcal{Pos}\left(l_1\right)\) and \(\theta\) a most general
+\(\bigcap_{i \in \left\{1, 2\right\}} \operatorname{Vars}\left(l_i, r_i\right) = \emptyset\),
+let \(p \in \operatorname{Pos}\left(l_1\right)\) and \(\theta\) a most general
 unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, then
 \(l_i \to r_i\) determine a *critical pair*
 \({\langle \theta r_1, \left(\theta l_1\right)\left[\theta r_2\right]_p \rangle}\).
 #+END_definition
 
-#+NAME: kanren-requires
-#+BEGIN_SRC scheme :eval yes :exports none :results silent
-(require rackunit)
-(require minikanren)
-
-;; Include un-`provided` core functions.
-(require/expose minikanren/minikanren (unify var var? reify walk*))
-#+END_SRC
-
+The functions in Listing [[critical-pairs-functions]] compute the critical pairs between
+two rewrite rules.
 #+NAME: critical-pairs-functions
-#+BEGIN_SRC scheme :eval yes :exports none :results none
+#+BEGIN_SRC scheme :eval yes :exports code :results none
 ;; Compute critical pairs for sub-terms of a compound term graph.
 (define critical-pairs-cons
   (lambda (l r l2 r2)
@@ -236,15 +357,16 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
         (let ([θ (unify l l2 '())]
               [cps '()])
           (unless (eq? θ #f)
-            (set! cps (cons `(,(reify r θ) . ,(reify r2 θ)) cps)))
+            (set! cps (cons `(,(walk* r θ) . ,(walk* r2 θ)) cps)))
           (when (cons? l)
             (set! cps (append (critical-pairs-cons l r l2 r2) cps)))
           cps))))
 #+END_SRC
 
-A simple example from [[citet:BaaderTermrewritingall1999]] Example 6.2.2:
+A simple example from [[citet:BaaderTermrewritingall1999][Example 6.2.2]] is given in
+Listing [[critical-pairs-examples]]:
 #+NAME: critical-pairs-examples
-#+BEGIN_SRC scheme :eval yes :exports results :results value code
+#+BEGIN_SRC scheme :eval yes :exports both :results value code
 (let ([x (var 0)]
       [y (var 1)]
       [z (var 2)]
@@ -260,40 +382,58 @@ A simple example from [[citet:BaaderTermrewritingall1999]] Example 6.2.2:
 (((f (i #(3)) (f #(3) #(2))) f e #(2)))
 #+end_src
 
-Now, all rules against each other:
-#+NAME: more-critical-pairs-examples
-#+BEGIN_SRC scheme :eval yes :exports results :results value code
-(let* ([x (var 0)]
-       [y (var 1)]
-       [z (var 2)]
-       [x1 (var 3)]
-       ;; Create some test rules.
-       ;; NOTE: Neither rule shares logic vars.
-       [rules `(((f (f ,x ,y) ,z) . ; ->
-                 (f ,x (f ,y ,z)))
-                ((f (i ,x1) ,x1) . ; ->
-                 'e))]
-       ;; The critical pairs
-       [c-pairs '()])
-  ;; Loop through combinations of the rules.
-  ;; TODO: This loop should be *inside*
-  (for/list ([r (in-combinations rules 2)])
-    (let* ([rule1 (car r)]
-           [rule2 (cadr r)]
-           [l (car rule1)]
-           [r (cdr rule1)]
-           [l2 (car rule2)]
-           [r2 (cdr rule2)])
-      (set! c-pairs (append (critical-pairs l r l2 r2) c-pairs))))
-  c-pairs)
+The function in Listing [[all-critical-pairs]] computes all critical pairs between a
+set of rewrite rules.
+#+NAME: all-critical-pairs
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+(define (all-critical-pairs rules)
+  (let ([c-pairs '()])
+    (for/list ([r (in-combinations rules 2)])
+      (let* ([rule1 (car r)]
+             [rule2 (cadr r)]
+             [l (car rule1)]
+             [r (cdr rule1)]
+             [l2 (car rule2)]
+             [r2 (cdr rule2)])
+        (set! c-pairs (append (critical-pairs l r l2 r2) c-pairs))))
+    c-pairs))
 #+END_SRC
 
-#+RESULTS: more-critical-pairs-examples
+#+NAME: all-critical-pairs-example
+#+BEGIN_SRC scheme :eval yes :exports both :results value code
+(all-critical-pairs
+ (rewrite-rules (x y z)
+                ((f (f x y) z) -> (f x (f y z)))
+                ((f (i x) x)  -> e)))
+#+END_SRC
+
+#+RESULTS: all-critical-pairs-example
 #+begin_src scheme
-(((f (i #(3)) (f #(3) #(2))) f (quote e) #(2)))
+(((f (i #(g4520)) (f #(g4520) #(g4519))) f e #(g4519)))
 #+end_src
 
-* Knuth-Bendix
+#+RESULTS: critical-pairs-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let* ([x (var 0)]
+       [x1 (var 1)]
+       [x2 (var 2)]
+       [y (var 3)]
+       [y1 (var 4)]
+       [y2 (var 5)]
+       [rules `(((+ (s ,x) ,y) . ; ->
+                 (s (+ ,x ,y)))
+                ((+ ,x1 (s ,y1)) . ; ->
+                 (s (+ ,x1 ,y1)))
+                ((+ ,x2 ,y2) . ; ->
+                 (+ ,y2 ,x2)))]
+       [c-pairs (all-critical-pairs rules)])
+  (check-equal? c-pairs
+                `(((s (+ ,x2 ,y1)) + (s ,y1) ,x2)
+                  ((s (+ ,x ,y2)) + ,y2 (s ,x))
+                  ((s (+ ,x (s ,y1))) s (+ (s ,x) ,y1)))))
+#+END_SRC
+
+* Orderings
 
 To start, we consider a basic cardinality-based measure on term-graphs
 [[citep:HarrisonIntroductionlogicautomated2007][Chapter 4.6]].
@@ -515,8 +655,17 @@ Our implementations roughly follow
 We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 :END:
 
-* Discussion
+* Completion
+** Huet's Completion Procedure
 
+#+NAME: cp-completion
+#+BEGIN_SRC scheme :eval yes :exports code :results none
+(define huet-completion
+  (lambda (idents ord)
+    ()))
+#+END_SRC
+
+* Discussion
 
 #+BIBLIOGRAPHY: ../tex/mk-term-rewriting.bib
 #+BIBLIOGRAPHYSTYLE: plainnat
