@@ -1,0 +1,6 @@
+auto/
+.build/
+_minted*/
+*.aux
+*.log
+*.pdf
