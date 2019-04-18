@@ -1,0 +1,7 @@
+auto/
+.cask/
+.build/
+_minted*/
+*.aux
+*.log
+*.pdf
