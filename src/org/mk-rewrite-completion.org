@@ -21,51 +21,152 @@ miniKanren.
 
 * Introduction
 
-The Knuth-Bendix algorithm [[citep:KnuthSimplewordproblems1983]] attempts
-to complete a set of rewrite rules, \(\mathcal{R}\), for a set of terms
-\(\mathcal{T}\left(\mathcal{F}, \mathcal{V}\right)\) derived from a set of
-function symbols \(\mathcal{F}\) and variables \(\mathcal{V}\).  These are
-combined to form a term rewriting system \(\left(\mathcal{R}, \mathcal{R}\right)\).
+Consider the set of equations--representing some standard group axioms
+(e.g. inverses, identity elements, associativity)--given by the following:
+\begin{equation}
+  \begin{aligned}
+    1 \cdot x &= x
+    \\
+    x^{-1} \cdot x &= 1
+    \\
+    (x \cdot y) \cdot z &= x \cdot (y \cdot z)
+  \;.
+  \end{aligned}
+  \label{eq:group-axioms}
+\end{equation}
 
-:EXAMPLE:
-An example using the standard group axioms:
-\begin{align}
-  1 \cdot x &= x
-  \\
-  x^{-1} \cdot x &= 1
-  \\
-  (x \cdot y) \cdot z &= x \cdot (y \cdot z)
-\end{align}
-is completed as
-\begin{align}
-  1 \cdot x &\to x
-  \\
-  x^{-1} \cdot x &\to 1
-  \\
-  (x \cdot y) \cdot z &\to x \cdot (y \cdot z)
-  \\
-  x^{-1} \cdot (x \cdot y) &\to y
-  \\
-  1^{-1} &\to 1
-  \\
-  x \cdot 1 &\to x
-  \\
-  (x^{-1})^{-1} &\to x
-  \\
-  x \cdot x^{-1} &\to 1
-  \\
-  x \cdot (x^{-1} \cdot y) &\to y
-  \\
-  (x \cdot y)^{-1} &\to y^{-1} x^{-1}
-\end{align}
+Our interest is in finding a "complete" set of rewrite rules--when possible--for
+such equations expressed as miniKanren
+[[citep:ByrdRelationalProgrammingminiKanren2009]] relations.  For instance, the
+equations in [[Cref:eq:group-axioms]] might be formulated as relations
+like src_scheme{(fresh (x ...) (== `(* 1 ,x) 1) ...)}.
+
+Completion for a set of rewrite rules affects ones ability to determine the validity
+of equational statements--among other things.  For example, under
+[[Cref:eq:group-axioms]] is \(x \cdot x^{-1} = 1\) also true/valid?.
+
+In general, miniKanren implements a complete search
+[[citep:HemannSimpleCompleteSearch2018, Hemannsmallembeddinglogic2016]] that can
+account for some of the concerns addressed by a complete set of rewrite rules.
+However, standard miniKanren relations that effectively implement the basic
+tasks of term rewriting can suffer from performance issues resulting from the
+inherently large search spaces induced by the relations.
+
+While some of these issues can be mitigated through alterations to the search process
+[[citep:SwordsGuidedSearchminiKanren, ZhangNeuralGuidedConstraint2018,
+BoskinSurprisinglyCompetitiveConditional2018]], these approaches introduce more
+opportunities to unknowingly violation the relational paradigm offered by
+miniKanren, but, more importantly, they require a distinct effort from the developer
+to provide context-dependent logic that actually *does* improve the search.
+
+For an important set of situations, we can use standard term rewriting
+automations that do not involving alterations to the underlying mechanics of
+miniKanren's search--or its fundamental relations/goals--and are able to provide
+improvements to the specification and application of relational identities that
+produce term rewriting systems.
+
+:NOTES:
+Ultimately, the process we're describing generates a reduced set
+[[citep:HarrisonIntroductionlogicautomated2007][Theorem 4.26]] of "directional"
+rewrite relations that represent a completed set of rewrite rules.
+
+The idea is that the completed rules, \(l \to r\), when expressed
+as src_scheme{(conde ((fresh (l r ...) (== l ...) (== r ...) ...)))}, are
+minimal--in some "overlap" sense that reduces the number of effective matches
+across src_scheme{conde} branches--and sufficient to represent the original
+equations/relations.
 :END:
 
-* Rewrite Rules in miniKanren
-Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
-from the rewrite rule completion provided by the Knuth-Bendix algorithm.
+As a further elaboration to some of the points above, consider the rewrite rules
+implied by the left-to-right replacements in [[Cref:eq:group-axioms]].  Under these
+rewrite rules we obtain the following normal form for \((x^{-1} \cdot x) \cdot y\)
+through repeated application of the rewrite rules in order (see
+[[citep:HarrisonIntroductionlogicautomated2007][Chapter 4.7]] and
+[[citep:BaaderTermrewritingall1999][Chapter 1]]):.
+#+NAME: group-normalize-order-1-example
+#+BEGIN_SRC scheme :eval yes :exports both :results value code
+(let ([rules (rewrite-rules (x y z)
+                            ((* (* x y) z) -> (* x (* y z)))
+                            ((* 1 x) -> x)
+                            ((* (i x) x) -> 1))])
+  (normalize '(* (* (i x) x) y) rules))
+#+END_SRC
+
+#+RESULTS: group-normalize-order-1-example
+#+begin_src scheme
+y
+#+end_src
+
+It just so happens that our left-to-right rewrite rule interpretation of [[Cref:eq:group-axioms]]
+"reduces" terms in some sense, and--as a result--will produce nice normal forms.
+However, in a more general context, we need a means of automatically deriving
+rules with such properties (and more).
+
+Now, consider the normal form for \((x \cdot x^{-1}) \cdot y\); as with our example above, it should
+be \(y\).  Unfortunately, our naively derived rewrite rules will not
+produce the expected normal form, because the identity \(x \cdot x^{-1}\) is not
+present--although it is implied by [[Cref:eq:group-axioms]].
+
+Unfortunately, the addition of new rewrite rules to compensate for this deficiency can easily
+remove any reducibility guarantees afforded by our present rules.  For instance, if
+we add commutativity \(x \cdot y \to y \cdot x\), even in more restricted
+forms, we will produce a non-terminating rewrite system.
+
+:TODO:
+Will miniKanren actually arrive at this identity?  Use the graph relations below
+to confirm/demonstrate.
+At the very least, demonstrate how much work is done by miniKanren to arrive
+at/validate the identity
+:END:
+
+A complete set of rewrite rules for [[Cref:eq:group-axioms]] is given by the following:
+\begin{equation}
+  \begin{aligned}
+    1 \cdot x &\to x
+    \\
+    x^{-1} \cdot x &\to 1
+    \\
+    (x \cdot y) \cdot z &\to x \cdot (y \cdot z)
+    \\
+    x^{-1} \cdot (x \cdot y) &\to y
+    \\
+    1^{-1} &\to 1
+    \\
+    x \cdot 1 &\to x
+    \\
+    (x^{-1})^{-1} &\to x
+    \\
+    x \cdot x^{-1} &\to 1
+    \\
+    x \cdot (x^{-1} \cdot y) &\to y
+    \\
+    (x \cdot y)^{-1} &\to y^{-1} x^{-1}
+  \;.
+  \end{aligned}
+\label{eq:group-completion}
+\end{equation}
+
+The rewrite rules in [[Cref:eq:group-completion]] can be produced mechanically from
+[[Cref:eq:group-axioms]]--and a generic reduction order--using standard approaches
+to computing a Knuth-Bendix completion (e.g. Huet's procedure).  As we can see,
+the commutative inverse identity (i.e. \(x^{-1} \cdot x = x \cdot x^{-1}\)) is
+present in a form that preserves termination, along with other important
+rewrites that we might have easily missed when attempting to manually produce a
+complete set of rules.
+
+** Notation and Implementations
+
+In what follows, we will use \(\mathcal{R}\) to represent a set of rewrite rules
+and \(\mathcal{T}\left(\mathcal{F}, \mathcal{V}\right)\) as a set of terms
+derived from a set of function symbols \(\mathcal{F}\) and variables
+\(\mathcal{V}\).  These are combined to form a term rewriting system
+\(\left(\mathcal{R}, \mathcal{R}\right)\).
+
+Throughout, we will use Racket to implement the term rewriting mechanics and
+miniKanren implementations.
 
 #+NAME: kanren-requires
-#+BEGIN_SRC scheme :eval yes :exports none :results silent
+#+BEGIN_SRC scheme :eval yes :exports code :results silent
 (require rackunit)
 (require minikanren)
 
@@ -73,125 +174,8 @@ from the rewrite rule completion provided by the Knuth-Bendix algorithm.
 (require/expose minikanren/minikanren (unify var var? reify walk*))
 #+END_SRC
 
-In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
-rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
-following:
-#+BEGIN_SRC scheme :eval never :results none :exports src
-(fresh (l r)
-  (conde
-   ;; l_1 -> r_1
-   ((== l L1)
-    (== r R1))
-   ;; l_2 -> r_2
-   ((== l L2)
-    (== r R2))
-   ;;...
-   ))
-#+END_SRC
-
-When the src_scheme{conde} forms are intercepted by a macro, one can parse the
-branches and extract implicit rewrite rules.  This step could be performed in an
-operator specifically for defining rewrite rules, or as a generalized miniKanren
-"compilation" step that reasons about arbitrary forms in the unevaluated
-miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
-potential \(l_i \to r_i\) rules).
-
-#+NAME: rule-operator
-#+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax rewrite-rules
-  (syntax-rules (->)
-    ((_ (q ...) (l -> r) ...)
-      ;; TODO: Call a function above that produces the critical pairs.
-      ;; The output should ultimately be a set of "completed"
-      ;; `conde' rewrite rules?
-      `((,l ,r) ...))))
-#+END_SRC
-
-#+NAME: rule-extractor
-#+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax extract-rewrite-rules
-  (syntax-rules ()
-    ((_ (conde
-         ((== l x) ...))
-        ;; TODO: Collect `(== l ...)` and `(== r ...)` pairs in
-        ;; branches to form rewrite rules.  Maybe even replace/unique-ify
-        ;; the involved logic variables.
-     (`((,x ,y) ...)))))
-#+END_SRC
-
-:NOTES:
-We might be able to construct relations for critical pairs.
-#+BEGIN_SRC scheme :eval never :exports none :results none
-(define reduces
-  (lambda (a b)
-    (conde
-     ((fresh (x)
-        (== a `(+ ,x ,x))
-        (== b `(* 2 ,x))))
-     ((fresh (x)
-        (== a `(exp (log ,x)))
-        (== b x))))))
-
-(define reduceo
-  (lambda (a b)
-    (conde
-     ((fresh (r)
-        (reduces a r)
-        (reduceo r b)))
-     ((reduces a b)))))
-
-(check-equal? (run* (q) (reduces '(* 5 5) q))
-              '())
-(check-equal? (run* (q) (reduceo '(+ 5 5) q))
-              '((* 2 5)))
-(check-equal? (run* (q) (reduceo '(exp (log (+ 5 5))) q))
-              '((+ 5 5) (* 2 5)))
-
-
-(define lapply-anyo
-  (lambda (func l-in l-out)
-    (letrec ((-lapply
-              (lambda (-in -out i-any)
-                (conde
-                 ((fresh (i-car i-cdr o-car o-cdr o-any)
-                    (== -in (cons i-car i-cdr))
-                    (== -out (cons o-car o-cdr))
-                    (conde
-                     ((func i-car o-car)
-                      (== o-any #t))
-                     ((== i-car o-car)
-                      (== o-any i-any)))
-                    (-lapply i-cdr o-cdr o-any)))
-                 ((== -in '())
-                  (== i-any #t)
-                  (== -out -in))))))
-      (-lapply l-in l-out #f))))
-
-
-(check-equal? (run* (q) (lapply-anyo reduceo '() q)) '())
-
-(define graph-applyo
-  (lambda (func g-in g-out)
-    (conde
-     ((fresh (i-rdc)
-        (func g-in i-rdc)
-        (conde
-         ((== i-rdc g-out))
-         ((graph-applyo func i-rdc g-out)))))
-     ((fresh (i-rdc)
-        (lapply-anyo
-         (lambda (a b) (graph-applyo func a b))
-         g-in i-rdc)
-        (conde
-         ((== i-rdc g-out))
-         ((graph-applyo func i-rdc g-out))))))))
-
-
-#+END_SRC
-:END:
-
-The macros in [[rewrite-macros]] should make it easier to specify a set of rewrite
-rules using the following syntax:
+The macros in [[rewrite-macros]] make it easier to specify a set of rewrite
+rules through the following syntax:
 #+NAME: rewrite-macro-usage
 #+BEGIN_SRC scheme :eval never :exports code :results none
 (rewrite-rules (x y)
@@ -211,6 +195,8 @@ Listing [[rewrite-macro-usage]] expands to the following:
     (subs-var xv '((g x y) . x))))
 #+END_SRC
 
+#+ATTR_LATEX: :float t :placement h!
+#+CAPTION:
 #+NAME: rewrite-macros
 #+BEGIN_SRC scheme :eval yes :exports code :results none
 (define (subs-var xv v)
@@ -240,6 +226,8 @@ Listing [[rewrite-macro-usage]] expands to the following:
 The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a form.
 src_scheme{normalize} attempts to produce a fixed-point/normalized result through
 repeated application of the rewrite rules.
+#+ATTR_LATEX: :float t :placement h!
+#+CAPTION:
 #+NAME: rewrite-helper-functions
 #+BEGIN_SRC scheme :eval yes :exports code :results none
 ;; Apply a single rewrite rule or `#f`.
@@ -663,6 +651,131 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 (define huet-completion
   (lambda (idents ord)
     ()))
+#+END_SRC
+
+
+* miniKanren Integrations
+
+Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
+from the rewrite rule completion.
+
+In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
+rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
+following:
+#+ATTR_LATEX: :float t :placement h!
+#+CAPTION:
+#+BEGIN_SRC scheme :eval never :results none :exports src
+(fresh (l r)
+  (conde
+   ;; l_1 -> r_1
+   ((== l L1)
+    (== r R1))
+   ;; l_2 -> r_2
+   ((== l L2)
+    (== r R2))
+   ;;...
+   ))
+#+END_SRC
+
+When the src_scheme{conde} forms are intercepted by a macro, one can parse the
+branches and extract implicit rewrite rules.  This step could be performed in an
+operator specifically for defining rewrite rules, or as a generalized miniKanren
+"compilation" step that reasons about arbitrary forms in the unevaluated
+miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
+potential \(l_i \to r_i\) rules).
+
+:NOTES:
+We might be able to construct relations for critical pairs.
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define reduces
+  (lambda (a b)
+    (conde
+     ((fresh (x)
+        (== a `(+ ,x ,x))
+        (== b `(* 2 ,x))))
+     ((fresh (x)
+        (== a `(exp (log ,x)))
+        (== b x))))))
+
+(define reduceo
+  (lambda (a b)
+    (conde
+     ((fresh (r)
+        (reduces a r)
+        (reduceo r b)))
+     ((reduces a b)))))
+
+(check-equal? (run* (q) (reduces '(* 5 5) q))
+              '())
+(check-equal? (run* (q) (reduceo '(+ 5 5) q))
+              '((* 2 5)))
+(check-equal? (run* (q) (reduceo '(exp (log (+ 5 5))) q))
+              '((+ 5 5) (* 2 5)))
+
+
+(define lapply-anyo
+  (lambda (func l-in l-out)
+    (letrec ((-lapply
+              (lambda (-in -out i-any)
+                (conde
+                 ((fresh (i-car i-cdr o-car o-cdr o-any)
+                    (== -in (cons i-car i-cdr))
+                    (== -out (cons o-car o-cdr))
+                    (conde
+                     ((func i-car o-car)
+                      (== o-any #t))
+                     ((== i-car o-car)
+                      (== o-any i-any)))
+                    (-lapply i-cdr o-cdr o-any)))
+                 ((== -in '())
+                  (== i-any #t)
+                  (== -out -in))))))
+      (-lapply l-in l-out #f))))
+
+
+(check-equal? (run* (q) (lapply-anyo reduceo '() q)) '())
+
+(define graph-applyo
+  (lambda (func g-in g-out)
+    (conde
+     ((fresh (i-rdc)
+        (func g-in i-rdc)
+        (conde
+         ((== i-rdc g-out))
+         ((graph-applyo func i-rdc g-out)))))
+     ((fresh (i-rdc)
+        (lapply-anyo
+         (lambda (a b) (graph-applyo func a b))
+         g-in i-rdc)
+        (conde
+         ((== i-rdc g-out))
+         ((graph-applyo func i-rdc g-out))))))))
+
+
+#+END_SRC
+:END:
+
+#+NAME: rule-operator
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define-syntax rewrite-rules
+  (syntax-rules (->)
+    ((_ (q ...) (l -> r) ...)
+      ;; TODO: Call a function above that produces the critical pairs.
+      ;; The output should ultimately be a set of "completed"
+      ;; `conde' rewrite rules?
+      `((,l ,r) ...))))
+#+END_SRC
+
+#+NAME: rule-extractor
+#+BEGIN_SRC scheme :eval never :exports none :results none
+(define-syntax extract-rewrite-rules
+  (syntax-rules ()
+    ((_ (conde
+         ((== l x) ...))
+        ;; TODO: Collect `(== l ...)` and `(== r ...)` pairs in
+        ;; branches to form rewrite rules.  Maybe even replace/unique-ify
+        ;; the involved logic variables.
+     (`((,x ,y) ...)))))
 #+END_SRC
 
 * Discussion
