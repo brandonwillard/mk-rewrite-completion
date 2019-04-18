@@ -33,6 +33,7 @@
 #+LaTeX_HEADER_EXTRA: \newenvironment{adjusttabular}[1]{\begin{adjustbox}{max width=\maxtabfigwidth,max totalheight=\maxtabfigheight,center,tabular=#1}}{\end{adjustbox}}
 #+LaTeX_HEADER_EXTRA: \newlength{\maxtabfigwidth}
 #+LaTeX_HEADER_EXTRA: \newlength{\maxtabfigheight}
+#+LaTeX_HEADER_EXTRA: \DeclareUnicodeCharacter{3B8}{$\theta$}
 
 #+BEGIN_EXPORT latex
 \setlength{\maxtabfigwidth}{\textwidth}
