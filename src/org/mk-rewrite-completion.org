@@ -653,7 +653,6 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
     ()))
 #+END_SRC
 
-
 * miniKanren Integrations
 
 Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
@@ -784,7 +783,6 @@ We might be able to construct relations for critical pairs.
 #+BIBLIOGRAPHYSTYLE: plainnat
 
 # Local Variables:
-# pyvenv-workon: "knuth-bendix-experiment"
 # geiser-scheme-implementation: racket
 # eval: (put 'fresh 'scheme-indent-function 1)
 # End:

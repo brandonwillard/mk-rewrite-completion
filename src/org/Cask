@@ -6,5 +6,12 @@
 (depends-on "f")
 (depends-on "s")
 (depends-on "projectile")
-(depends-on "ob-ipython")
 (depends-on "org-ref")
+(depends-on "geiser")
+(depends-on "string-inflection")
+(depends-on "org-ref+"
+            :git "https://github.com/brandonwillard/org-btw.git"
+            :branch "master")
+(depends-on "ox-latex+"
+            :git "https://github.com/brandonwillard/org-btw.git"
+            :branch "master")

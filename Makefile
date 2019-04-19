@@ -2,8 +2,6 @@
 
 all:
 	make -C src/org -f Makefile
-	make -C src/python -f Makefile
-	make -C src/R -f Makefile
 	make -C src/tex -f Makefile
 
 clean:

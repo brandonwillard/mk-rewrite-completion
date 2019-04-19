@@ -6,6 +6,8 @@
 .PHONY: all clean install-cask %.pdf %.tex
 .PRECIOUS: ${TEX_DIR}/%.tex
 
+UNAME := $(shell uname -s)
+
 CASK_DIR ?= ${HOME}/.cask
 CASK_BIN ?= ${CASK_DIR}/bin/cask
 EMACS_BIN ?= emacs
@@ -21,11 +23,16 @@ TEX_FILES = $(addsuffix .tex, ${TEX_DIR}/$(basename ${ORG_FILES}))
 all: $(patsubst %.org, ${DEST_DIR}/%.pdf, ${ORG_FILES})
 
 install-cask:
-	curl -fsSkL https://raw.github.com/cask/cask/master/go | python
+ifeq ($(UNAME),Darwin)
+	brew install cask
+else
+	curl -fsSL https://raw.githubusercontent.com/cask/cask/master/go | python
+endif
+
 
 ${TEX_DIR}/%.tex: %.org .cask org-export-init.el
-	@if [ ! -f ${CASK_BIN} ]; then echo "Cask not found; do 'make install-cask' first."; exit 1; fi
-	CASK_DIR=${CASK_DIR} $(EMACS_BIN) --quick --batch -l org-export-init.el --visit $< -f org-latex-export-to-latex
+	@if [ ! -f ${CASK_BIN} ]; then echo "Cask not found; run 'make install-cask' first."; exit 1; fi
+	CASK_DIR=${CASK_DIR} $(EMACS_BIN) --quick --batch -l org-export-init.el --visit $< -f org-latex+-export-to-latex
 	mv -f $(@F) $@
 
 ${DEST_DIR}/%.pdf: ${TEX_DIR}/%.tex
