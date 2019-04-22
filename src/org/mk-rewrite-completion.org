@@ -233,32 +233,43 @@ Listing [[rewrite-macro-usage]] expands to the following:
 '(list
   (let ((xv `((x unquote (var (gensym)))
               (y unquote (var (gensym))))))
-    (subs-var xv '((f (g x x) y) g x y)))
+    (replace-in-graph xv '((f (g x x) y) g x y)))
   (let ((xv `((x unquote (var (gensym)))
               (y unquote (var (gensym))))))
-    (subs-var xv '((g x y) . x))))
+    (replace-in-graph xv '((g x y) . x))))
 #+END_SRC
 
 #+ATTR_LATEX: :float t :placement h!
 #+CAPTION:
 #+NAME: rewrite-macros
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
-(define (subs-var xv v)
-  (match v
+;; Returns all the variables in a term graph.
+(define (vars x [s (set)])
+  (cond
+   [(pair? x)
+    (set-union (vars (car x))
+               (vars (cdr x)))]
+   [(var? x)
+    (set-add s x)]
+   [else s]))
+
+;; Replace elements in a term graph according to an alist.
+(define (replace-in-graph xv graph)
+  (match graph
     [(cons h t)
-     (cons (subs-var xv h) (subs-var xv t))]
+     (cons (replace-in-graph xv h) (replace-in-graph xv t))]
     [_
-     (let* ([r-pair (assoc v xv)])
+     (let* ([r-pair (assoc graph xv)])
        (if r-pair
            (cdr r-pair)
-           v))]))
+           graph))]))
 
 (define-syntax (rewrite-rules stx)
   (syntax-case stx (->)
     [(_ (x ...) (l -> r) ...)
      #`(list
         (let ([xv `((x . ,(var (gensym))) ...)])
-          (subs-var xv (quote (l . r)))) ...)]))
+          (replace-in-graph xv (quote (l . r)))) ...)]))
 #+END_SRC
 
 #+NAME: rewrite-macros-tests
@@ -270,77 +281,100 @@ Listing [[rewrite-macro-usage]] expands to the following:
 The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a form.
 src_scheme{normalize} attempts to produce a fixed-point/normalized result through
 repeated application of the rewrite rules.
+
 #+ATTR_LATEX: :float t :placement h!
 #+CAPTION:
 #+NAME: rewrite-helper-functions
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
+;; Apply a function on a grounded version of a term graph; afterward,
+;; any resulting grounded terms are replaced with their original variables.
+(define (apply-on-grounded fn t [lst '()])
+  (let* ([t-vars (vars t)]
+         [var-alist (for/list ([v t-vars])
+                      (cons v (gensym)))]
+         ;; Ground the vars in term `t'.
+         [t-gnd (replace-in-graph var-alist t)]
+         [t-new (apply fn t-gnd lst)]
+         [rev-alist (for/list ([v var-alist])
+                      (cons (cdr v) (car v)))])
+    ;; Un-ground the grounded vars.
+    (replace-in-graph rev-alist t-new)))
+
 ;; Apply a single rewrite rule or `#f`.
-(define rewrite-1
-  (lambda (t lr)
-    (let* ([l (car lr)]
-           [r (cdr lr)]
-           [θ (if (not (var? t))
-                  (unify t l '())
-                  #f)]
-           [t-new (if (eq? θ #f)
-                      #f
-                      (walk* r θ))])
-      t-new)))
+(define (rewrite-1 t lr)
+  (if (var? t)
+      t
+      (match lr
+        [(cons l r)
+         (let* ([θ (unify l t '())]
+                [t-new (if (eq? θ #f)
+                           #f
+                           (begin
+                             ;; (printf "------\nθ = ~a\n" θ)
+                             ;; (printf "rewrite-1: [~a -> ~a]  ~a -> ~a\n" l r t (walk* r θ))
+                             (walk* r θ)))])
+           t-new)])))
 
 ;; Apply the first rewrite rule that unifies; return `#f` otherwise.
-(define rewrite
-  (lambda (t rules)
-    (ormap (curry rewrite-1 t) rules)))
+(define (-rewrite rules t)
+  (ormap (curry rewrite-1 t) rules))
 
 ;; Apply rewrite rules until a fixed-point is reached.
-(define normalize
-  (lambda (t rules)
-    (cond
-     [(list? t)
-      (let* ([t-car (car t)]
-             [t-cdr (cdr t)]
-             [t-cdr-new (for/list ([a t-cdr])
-                          (normalize a rules))])
-        (if (eq? t-cdr-new #f)
-            t
-            (let* ([t-new (cons t-car t-cdr-new)]
-                   [t-new-new (rewrite t-new rules)])
-              (if (eq? t-new-new #f)
-                  t-new
-                  (normalize t-new-new rules)))))]
-     [else t])))
+(define (-normalize rules t)
+  (match t
+    [(cons t-car t-cdr)
+     (let ([t-cdr-new (for/list ([a t-cdr])
+                        (-normalize rules a))])
+       (if (eq? t-cdr-new #f)
+           t
+           (begin
+             ;; (printf "normalize: ~a -> ~a\n" t-cdr t-cdr-new)
+             (let* ([t-new (cons t-car t-cdr-new)]
+                    [t-new-new (-rewrite rules t-new)])
+               (if (eq? t-new-new #f)
+                   t-new
+                   (begin
+                     ;; (printf "normalize: ~a -> ~a\n" t-new t-new-new)
+                     (-normalize rules t-new-new)))))))]
+    [_ t]))
+
+(define (normalize rules t)
+  (apply-on-grounded (curry -normalize rules) t))
+
+(define (rewrite rules t)
+  (apply-on-grounded (curry -rewrite rules) t))
 #+END_SRC
 
 #+NAME: rewrite-helper-functions-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
-(check-equal? (rewrite '(f x y)
-                       (let ([q (var 0)]
+(check-equal? (rewrite (let ([q (var 0)]
                              [w (var 1)])
                          `(((g ,q ,w) . ,w)
-                           ((i) . 1))))
+                           ((i) . 1)))
+                       '(f x y))
               #f)
-(check-equal? (rewrite '(g x (i))
-                       (let ([q (var 0)]
+(check-equal? (rewrite (let ([q (var 0)]
                              [w (var 1)])
                          `(((g ,q ,w) . ,w)
-                           ((i) . 1))))
+                           ((i) . 1)))
+                       '(g x (i)))
               '(i))
 
-(check-equal? (normalize '(g (f i) (i))
-                         (let ([q (var 0)]
+(check-equal? (normalize (let ([q (var 0)]
                                [w (var 1)]
                                [z (var 2)])
                            `(((g ,q ,w) . ,w)
                              ((f ,z) . ,z)
-                             ((i) . 1))))
+                             ((i) . 1)))
+                         '(g (f i) (i)))
               1)
-(check-equal? (normalize '(g (f (i)) (i))
-                         (let ([q (var 0)]
+(check-equal? (normalize (let ([q (var 0)]
                                [w (var 1)]
                                [z (var 2)])
                            `(((g ,q ,w) . (+ ,q ,w))
                              ((f ,z) . ,z)
-                             ((i) . 1))))
+                             ((i) . 1)))
+                         '(g (f (i)) (i)))
               '(+ 1 1))
 #+END_SRC
 
@@ -523,21 +557,6 @@ well-suited for algebraic theories.
 Instead, we will use the standard lexicographical path order (LPO)
 [[citep:BaaderTermrewritingall1999][Example 5.4.12]].
 
-First, some helper functions.
-#+NAME: vars-helper
-#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref order-functions
-;; Returns all the variables in a term graph.
-(define vars
-  (lambda (x [s (set)])
-    (cond
-     [(pair? x)
-      (set-union (vars (car x))
-                 (vars (cdr x)))]
-     [(var? x)
-      (set-add s x)]
-     [else s])))
-#+END_SRC
-
 #+NAME: vars-helper-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
 (let ([v0 (var 0)]
@@ -690,6 +709,42 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 
 ** Completion
 *** Huet's Completion Procedure
+
+#+NAME: normalize-and-orient
+#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref completion-functions
+(define (norm-orient ord rules eq)
+  (match eq
+    [(cons s t)
+     (let* ([-s (normalize rules s)]
+            [-t (normalize rules t)]
+            [s-gt-t (ord -s -t)])
+       (cond
+        [(boolean? s-gt-t)
+         (if s-gt-t
+             (cons -s -t)
+             (cons -t -s))]
+        [else (error 'orientation)]))]))
+#+END_SRC
+
+#+NAME: normalize-and-orient-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let* ([ord (curry lpo-gt '(* i 1))]
+       [rules (rewrite-rules (x y z)
+                ((* 1 x) -> x)
+                ((* (* x y) z) -> (* x (* y z)))
+                ((* (i x) x) -> 1))]
+       [x (var (gensym))]
+       [l 1]
+       [r `(* (* 1 ,x) (i (* 1 ,x)))]
+       [eq `(,l . ,r)]
+       ;; We start with the standard group l -> r rules and
+       ;; normalize + orient the following rule: (1 * x) -> (1 * x) * (1 * x)^{-1}.
+       ;; First, this equation should reduce to the missing right inverse identity.
+       ;; Second, the reduction order should be reversed (i.e. larger term to smaller term).
+       [res (norm-orient ord rules eq)])
+  (check-equal? res `((* ,x (i ,x)) . 1)))
+
+#+END_SRC
 
 #+NAME: cp-completion
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref completion-functions
@@ -911,5 +966,5 @@ The relations implemented here traverse graphs and apply other relations recursi
 
 # Local Variables:
 # geiser-scheme-implementation: racket
-# eval: (put 'fresh 'scheme-indent-function 1)
+# eval: (progn (put 'rewrite-rules 'scheme-indent-function 1) (put 'fresh 'scheme-indent-function 1))
 # End:
