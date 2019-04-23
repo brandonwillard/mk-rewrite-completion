@@ -103,7 +103,6 @@ through repeated application of the same rewrite rules in order (see
 
 #+RESULTS: group-normalize-order-1-example
 #+begin_src scheme
-y
 #+end_src
 
 It just so happens that our left-to-right rewrite rule interpretation of [[Cref:eq:group-axioms]]
@@ -196,7 +195,6 @@ miniKanren's search--or its fundamental relations/goals--and are able to provide
 improvements to the specification and application of relational identities that
 produce term rewriting systems.
 
-
 ** Notation and Implementations
 
 In what follows, we will use \(\mathcal{R}\) to represent a set of rewrite rules
@@ -214,9 +212,138 @@ miniKanren implementations.
 (require racket/pretty)
 (require minikanren)
 
+;; For interactive debugging, try `raco pkg install debug` and the following:
+;; (require debug/repl)
+;; Then use `(debug-repl)` and `(resume)'.
+
+;; Similarly...
+(require errortrace)
+
 ;; Include un-`provided` core functions.
 (require/expose minikanren/minikanren (unify var var? reify walk*))
 #+END_SRC
+
+:TODO:
+We could/should have structs for terms, rewrite rules, etc.
+This approach uses [[https://docs.racket-lang.org/reference/pairs.html#%28def._%28%28quote._~23~25kernel%29._make-reader-graph%29%29][reader graphs]], which allow us to make src_scheme{equals?}
+ignore src_scheme{var} and swap out/ground variables effortlessly.
+
+#+RESULTS: term-structs
+#+BEGIN_SRC scheme :eval never :exports none :results none
+;; (require racket/base)
+;; (require (except-in racket cons list)
+;;          (rename-in racket [cons base-cons] [list base-list]))
+(require racket/generic)
+(require data/order)
+
+(define-generics term
+  (ground? term)
+  ;; TODO: overloading `cons' would allow us to assemble `term' objects
+  ;; incrementally (e.g. union their sets of placeholders in `term-vars').
+  ;; Seems like there's something I'm not understanding about this generics
+  ;; interface/macro, though...
+  #:defaults  ([list?
+                (define (ground? term)
+                  (set-empty? (vars term)))]))
+
+(check-false (ground? `(i ,(var 0))))
+(check-true (ground? `(i e)))
+
+(struct term-graph (graph vars)
+        #:transparent
+        #:constructor-name make-term-graph
+        #:omit-define-syntaxes
+        #:guard
+        (lambda (graph vars type-name)
+          (cond
+           [(term-graph? graph)
+            (values (term-graph-graph graph) (term-graph-vars graph))]
+           [else (values graph vars)]))
+        #:methods gen:term
+        [(define (ground? self)
+           (set-empty? (term-graph-vars self)))]
+        #:methods gen:equal+hash
+        [(define (equal-proc a b equal?-recur)
+           ;; We don't want vars to throw off the comparison, so we use the
+           ;; reader graphs and their placeholders.
+           (equal?-recur (term-graph-graph a) (term-graph-graph b)))
+         (define (hash-proc a hash-recur)
+           (hash-recur (term-graph-graph a)))
+         (define (hash2-proc a hash2-recur)
+           (hash2-recur (term-graph-graph a)))])
+
+(define (term-graph form)
+  (cond
+   [(term-graph? form)
+    (make-term-graph (term-graph-graph form) (term-graph-vars form))]
+   [else
+    (let* ([form-vars (vars form)]
+           [ph-alist (for/list ([v form-vars]
+                                [i (range (set-count form-vars))])
+                       (cons v (make-placeholder
+                                (string->symbol (format "*x~a*" i)))))]
+           [graph (replace-in-graph ph-alist form)])
+      (make-term-graph (make-reader-graph graph)
+                       (for/set ([v ph-alist]) (cdr v))))]))
+
+(let ([t1 (term-graph `(i ,(var 0)))]
+      [t1-2 (term-graph `(i ,(var 1)))]
+      [t2 (term-graph `(i e))])
+  (printf "~a" t1)
+  (check-true (equal? t1 t1-2))
+  (check-false (equal? t1 t2))
+  (check-false (ground? t1))
+  (check-true (ground? t2)))
+
+(struct rewrite-rule (lhs rhs)
+        #:transparent
+        #:guard
+        (lambda (lhs rhs type-name)
+          (cond
+           [(not (and (term-graph? lhs) (term-graph? rhs)))
+            (error type-name "Both arguments must be term graphs.")]
+           [else (values lhs rhs)]))
+        #:methods gen:custom-write
+        [(define (write-proc rule port mode)
+           (fprintf port "~a -> ~a"
+                    (rewrite-rule-lhs rule)
+                    (rewrite-rule-rhs rule)))])
+
+(struct equation (lhs rhs)
+        #:transparent
+        #:guard
+        (lambda (lhs rhs type-name)
+          (cond
+           [(not (and (term-graph? lhs) (term-graph? rhs)))
+            (error type-name "Both arguments must be term graphs.")]
+           [else (values lhs rhs)]))
+        #:methods gen:equal+hash
+        [(define (equal-proc a b equal?-recur)
+           ;; TODO: Equality of equations should not be affected by lhs, rhs order.
+           (or (equal?-recur
+                (term-graph-graph (equation-lhs a))
+                (term-graph-graph (equation-lhs b)))
+               (equal?-recur
+                (term-graph-graph a)
+                (term-graph-graph b))))
+         (define (hash-proc a hash-recur)
+           ;; TODO: Seems like we would need an ordering for this, no?
+           (hash-recur (term-graph-graph a)))
+         (define (hash2-proc a hash2-recur)
+           (hash2-recur (term-graph-graph a)))]
+        #:methods gen:custom-write
+        [(define (write-proc eqn port mode)
+           (fprintf port "~a = ~a"
+                    (equation-lhs eqn)
+                    (equation-rhs eqn)))])
+
+(let ([t (term-graph `(1 ,(var 0)))])
+  t)
+
+(let ([rule (rewrite-rule (term-graph `(1 ,(var 0))) (term-graph 1))])
+  rule)
+#+END_SRC
+:END:
 
 The macros in [[rewrite-macros]] make it easier to specify a set of rewrite
 rules through the following syntax:
@@ -244,14 +371,18 @@ Listing [[rewrite-macro-usage]] expands to the following:
 #+NAME: rewrite-macros
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
 ;; Returns all the variables in a term graph.
-(define (vars x [s (set)])
-  (cond
-   [(pair? x)
-    (set-union (vars (car x))
-               (vars (cdr x)))]
-   [(var? x)
-    (set-add s x)]
-   [else s]))
+(define (vars x [res (set)])
+  (match x
+   [(cons a b)
+    (let* ([res (vars a res)])
+      (vars b res))]
+   [(? var? x)
+    (if (set? res)
+        (set-add res x)
+        (if (member x res)
+            res
+            (append res (list x))))]
+   [_ res]))
 
 ;; Replace elements in a term graph according to an alist.
 (define (replace-in-graph xv graph)
@@ -274,18 +405,49 @@ Listing [[rewrite-macro-usage]] expands to the following:
 
 #+NAME: rewrite-macros-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
+(match-let ([(list v0 v1 v2 v3 v4)
+             (for/list ([v (range 5)]) (var v))])
+  (check-equal?
+   (vars `(f (g ,v0 x (,v0 ,v2 ,v3)) ,v1 (h (j (k ,v4) ,v3))))
+   (set v1 v3 v0 v4 v2)))
+
 (check-true (let ([q (car (rewrite-rules (x y) (x -> x)))])
               (eq? (car q) (cdr q))))
 #+END_SRC
 
 The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a form.
-src_scheme{normalize} attempts to produce a fixed-point/normalized result through
-repeated application of the rewrite rules.
+Specifically, the function src_scheme{normalize} attempts to produce a
+fixed-point/normalized result through repeated application of the rewrite rules.
 
 #+ATTR_LATEX: :float t :placement h!
 #+CAPTION:
 #+NAME: rewrite-helper-functions
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
+;; Convert vars in a graph according to a function taking a number assigned to
+;; each var observed (in order).
+(define (vars-to-symbols x [fn (lambda (i) (string->symbol (format "x~a" i)))])
+  (let* ([x-vars (vars x '())]
+         [new-vars (for/list ([v x-vars]
+                              [i (range (set-count x-vars))])
+                     (cons v (fn i)))]
+         [x-new (replace-in-graph new-vars x)])
+    x-new))
+
+(define (print-pair delim rules)
+  (cond
+   [(list? rules)
+    (for ([rule rules])
+      (match rule
+        [(cons r l)
+         (printf "\t~a ~a ~a\n" r delim l)]))]
+   [else
+    (match rules
+      [(cons r l)
+       (printf "\t~a ~a ~a\n" r delim l)])]))
+
+(define print-rule (curry print-pair "->"))
+(define print-eqn (curry print-pair "="))
+
 ;; Apply a function on a grounded version of a term graph; afterward,
 ;; any resulting grounded terms are replaced with their original variables.
 (define (apply-on-grounded fn t [lst '()])
@@ -323,7 +485,9 @@ repeated application of the rewrite rules.
 (define (-normalize rules t)
   (match t
     [(cons t-car t-cdr)
-     (let ([t-cdr-new (for/list ([a t-cdr])
+     (let ([t-cdr-new (for/list ([a (if (list? t-cdr)
+                                        t-cdr
+                                        (list t-cdr))])
                         (-normalize rules a))])
        (if (eq? t-cdr-new #f)
            t
@@ -331,7 +495,7 @@ repeated application of the rewrite rules.
              ;; (printf "normalize: ~a -> ~a\n" t-cdr t-cdr-new)
              (let* ([t-new (cons t-car t-cdr-new)]
                     [t-new-new (-rewrite rules t-new)])
-               (if (eq? t-new-new #f)
+               (if (or (eq? t-new-new #f) (equal? t-new-new t-new))
                    t-new
                    (begin
                      ;; (printf "normalize: ~a -> ~a\n" t-new t-new-new)
@@ -342,7 +506,10 @@ repeated application of the rewrite rules.
   (apply-on-grounded (curry -normalize rules) t))
 
 (define (rewrite rules t)
-  (apply-on-grounded (curry -rewrite rules) t))
+  (let ([res (apply-on-grounded (curry -rewrite rules) t)])
+    (if (eq? res #f)
+        t
+        res)))
 #+END_SRC
 
 #+NAME: rewrite-helper-functions-tests
@@ -352,7 +519,7 @@ repeated application of the rewrite rules.
                          `(((g ,q ,w) . ,w)
                            ((i) . 1)))
                        '(f x y))
-              #f)
+              '(f x y))
 (check-equal? (rewrite (let ([q (var 0)]
                              [w (var 1)])
                          `(((g ,q ,w) . ,w)
@@ -376,6 +543,13 @@ repeated application of the rewrite rules.
                              ((i) . 1)))
                          '(g (f (i)) (i)))
               '(+ 1 1))
+(check-equal? (normalize (rewrite-rules (q w z)
+                           ((+ 1 1) -> (+ 1 1))
+                           ((g q w) -> (+ q w))
+                           ((f z) -> z)
+                           ((i) -> 1))
+                         '(g (f (i)) (i)))
+              '(+ 1 1))
 #+END_SRC
 
 * Rewrite Rule Completion
@@ -394,111 +568,209 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
 The functions in Listing [[critical-pairs-functions]] compute the critical pairs between
 two rewrite rules.
 #+NAME: critical-pairs-functions
-#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref cp-functions
-;; Compute critical pairs for sub-terms of a compound term graph.
-(define critical-pairs-cons
-  (lambda (l r l2 r2)
-    (cond
-     [(cons? l)
-      (let* ([l-car (car l)]
-             [l-cdr (cdr l)]
-             [θ (if (not (var? l-car))
-                    (unify l-car l2 '())
-                    #f)]
-             [cps (if (eq? θ #f)
-                      '()
-                      (list (cons (walk* r θ)
-                                  (walk* (cons r2 l-cdr) θ))))]
-             [cps (append (for/list ([h (critical-pairs-cons l-car r l2 r2)])
-                            (cons (car h) (cons (cdr h) l-cdr))) cps)]
-             [cps (append (for/list ([t (critical-pairs-cons l-cdr r l2 r2)])
-                            (cons (car t) (cons l-car (cdr t)))) cps)])
-        cps)]
-     [else '()])))
+#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref cp-functions :noweb strip-export
+<<scheme-setup>>
+<<rewrite-functions>>
 
-;; Compute critical pairs for an arbitrary term graph.
-(define critical-pairs
-  (lambda (l r l2 r2)
-    (if (var? l)
-        '()
-        (let ([θ (unify l l2 '())]
-              [cps '()])
-          (unless (eq? θ #f)
-            (set! cps (cons `(,(walk* r θ) . ,(walk* r2 θ)) cps)))
-          (when (cons? l)
-            (set! cps (append (critical-pairs-cons l r l2 r2) cps)))
-          cps))))
+(define (match-and-replace term rules matches)
+  (cond
+   [(not (var? term))
+    (append
+     matches
+     (append-map
+      (lambda (rule)
+        (match-let* ([(cons l2 r2) rule])
+          (let* ([θ (unify term l2 '())])
+            (if (eq? θ #f)
+                matches
+                (list (cons θ r2))))))
+      rules))]
+   [else
+    matches]))
+
+(define (walk-matches graph rules matches [match-graph #t])
+  (let* ([new-matches
+          ;; Check the whole term/graph.
+          (if match-graph
+              (match-and-replace graph rules '())
+              '())])
+    ;; Descend into the term/graph.
+    (match graph
+      [(cons rator rands)
+       (let* ([rator-matches (walk-matches rator rules '())]
+              [rands-matches (walk-matches rands rules '() #f)])
+         (append
+          matches
+          new-matches
+          (for/list ([m rator-matches])
+            (match-let* ([(cons θ new-rator) m]
+                         [new-graph (cons new-rator rands)])
+              (when (and (cons? new-graph) (not (list? new-graph)))
+                  (error "rator bad cons:" rator new-rator rules))
+              (cons θ new-graph)))
+          (for/list ([m rands-matches])
+            (match-let* ([(cons θ new-rands) m]
+                         [new-graph (cons rator new-rands)])
+              (when (and (cons? new-graph) (not (list? new-graph)))
+                  (error "rands bad cons:" rands new-rands rules))
+              (cons θ new-graph)))))]
+      [else (append matches new-matches)])))
+
+(define (critical-pairs rule1 rule2)
+  (match-let* (;; Make sure that variables in rules don't overlap.
+               [rule-new (vars-to-symbols rule1 (lambda (i) (var (gensym))))]
+               [(cons l1 r1) rule-new]
+               [match-res (walk-matches l1 rule2 '())])
+    (for/list ([m match-res])
+      (match-let* ([(cons θ lrp) m]
+                   [cp-car (walk* r1 θ)]
+                   [cp-cdr (walk* lrp θ)])
+        (cons cp-car cp-cdr)))))
 #+END_SRC
-
-A simple example from [[citet:BaaderTermrewritingall1999][Example 6.2.2]] is given in
-Listing [[critical-pairs-examples]]:
-#+NAME: critical-pairs-examples
-#+BEGIN_SRC scheme :eval yes :exports both :results value code
-(let ([x (var 0)]
-      [y (var 1)]
-      [z (var 2)]
-      [x1 (var 3)])
-  (critical-pairs `(f (f ,x ,y) ,z) ; ->
-                  `(f ,x (f ,y ,z))
-                  `(f (i ,x1) ,x1) ; ->
-                  'e))
-#+END_SRC
-
-#+RESULTS: critical-pairs-examples
-#+begin_src scheme
-(((f (i #(3)) (f #(3) #(2))) f e #(2)))
-#+end_src
 
 The function in Listing [[all-critical-pairs]] computes all critical pairs between a
 set of rewrite rules.
 #+NAME: all-critical-pairs
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref cp-functions
 (define (all-critical-pairs rules)
-  (let ([c-pairs '()])
-    (for/list ([r (in-combinations rules 2)])
-      (let* ([rule1 (car r)]
-             [rule2 (cadr r)]
-             [l (car rule1)]
-             [r (cdr rule1)]
-             [l2 (car rule2)]
-             [r2 (cdr rule2)])
-        (set! c-pairs (append (critical-pairs l r l2 r2) c-pairs))))
-    c-pairs))
+  (append-map
+   (lambda (rule)
+     (critical-pairs rule rules))
+   rules))
 #+END_SRC
 
+#+RESULTS: critical-pairs-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent :noweb yes
+;; Expected "raw" critical pairs:
+;; 1 (+ x1 x0) -> (+ x1 x0)
+;; 2 (+ (s x1) x0) -> (s (+ x0 x1))
+;; 2 (+ (s x1) x0) -> (s (+ x0 x1))
+;; 3 (+ x1 (s x0)) -> (s (+ x0 x1))
+;; 3 (+ x1 (s x0)) -> (s (+ x0 x1))
+;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
+;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
+;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
+;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
+;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
+;; 7 (s (+ x0 x1)) -> (+ x1 (s x0))
+;; 7 (s (+ x0 x1)) -> (+ x1 (s x0))
+;; 8 (s (+ x0 (s x1))) -> (s (+ (s x0) x1))
+;; 8 (s (+ x0 (s x1))) -> (s (+ (s x0) x1))
+;; ---------
+;; 1 (+ x0 x1) -> (+ x0 x1)
+;; 2 (+ (s x0) x1) -> (s (+ x1 x0))
+;; 3 (+ x0 (s x1)) -> (s (+ x1 x0))
+;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
+;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
+;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
+;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
+;; 7 (s (+ x1 x0)) -> (+ x0 (s x1))
+;; 8 (s (+ x1 (s x0))) -> (s (+ (s x1) x0))
+(let* ([expected
+        '(((+ x0 x1) . (+ x0 x1))
+          ((+ (s x0) x1) . (s (+ x1 x0)))
+          ((+ x0 (s x1)) . (s (+ x1 x0)))
+          ((s (+ x0 x1)) . (+ (s x1) x0))
+          ((s (+ x0 x1)) . (s (+ x0 x1)))
+          ((s (+ (s x0) x1)) . (s (+ x0 (s x1))))
+          ((s (+ x0 x1)) . (+ x1 (s x0)))
+          ((s (+ x0 (s x1))) . (s (+ (s x0) x1))))]
+       [rules (rewrite-rules (x0 x1)
+                ((+ (s x0) x1) -> (s (+ x0 x1)))
+                ((+ x0 (s x1)) -> (s (+ x0 x1)))
+                ((+ x0 x1) -> (+ x1 x0)))]
+       [c-pairs (all-critical-pairs rules)]
+       [c-pairs (remove-duplicates
+                 (for/list ([cp c-pairs])
+                   (vars-to-symbols cp (lambda (i) (var i)))))])
+  (check-equal? (list->set (vars-to-symbols c-pairs))
+                (list->set expected)))
+
+;; These are the critical pairs and their respective inputs:
+;; [((* e x0) . x0), ((* e x0) . x0)]:	[x0, x0]
+;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* e x0) . x0)]:	[(* e (* x0 x1)), (* x0 x1)]
+;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (* x0 x1) x2) * x0 (* x1 x2))]:	[(* (* x0 x1) (* x2 x3)), (* (* x0 (* x1 x2)) x3)]
+;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (* x0 x1) x2) * x0 (* x1 x2))]:	[(* x0 (* x1 x2)), (* x0 (* x1 x2))]
+;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (i x0) x0) . e)]:	[(* (i x0) (* x0 x1)), (* e x0)]
+;; [((* (i x0) x0) . e), ((* (i x0) x0) . e)]:	[e, e]
+;; (let ([x0 (var 0)]
+;;       [x1 (var 1)])
+;;   (critical-pairs '((* e x0) . x0) '((* e x0) . x0)))
+;; Generated from:
+;; (let* ([eqns (rewrite-rules (x y z)
+;;                ((* e x) -> x)
+;;                ((* (* x y) z) -> (* x (* y z)))
+;;                ((* (i x) x) -> e))]
+;;        [pairs (cartesian-product eqns eqns)])
+;;   (for ([p pairs])
+;;     (match-let* ([(list r1 r2) p])
+;;       (for ([cps (critical-pairs r1 r2)])
+;;         (match cps
+;;           [(cons cp1 cp2)
+;;            (printf "[~a, ~a]:\t[~a, ~a]\n"
+;;                    (vars-to-symbols r1)
+;;                    (vars-to-symbols r2)
+;;                    (vars-to-symbols cp1)
+;;                    (vars-to-symbols cp2))]
+;;           [_ (printf "none\n")])))))
+
+(let* ([eqns (rewrite-rules (x y z)
+               ((* e x) -> x)
+               ((* (* x y) z) -> (* x (* y z)))
+               ((* (i x) x) -> e))]
+       [expected
+        '((x0 . x0)
+          ;; TODO: Why does the OCaml code swap these orders?
+          ;; ((* x0 x1) . (* e (* x0 x1)))
+          ((* e (* x0 x1)) . (* x0 x1))
+          ;; ((* e x0) . (* (i x1) (* x1 x0)))
+          ((* (i x0) (* x0 x1)) . (* e x1))
+          ((* x0 (* x1 x2)) . (* x0 (* x1 x2)))
+          ;; ((* (* x0 (* x1 x2)) x3) . (* (* x0 x1) (* x2 x3)))
+          ((* (* x0 x1) (* x2 x3)) . (* (* x0 (* x1 x2)) x3))
+          (e . e))]
+       [c-pairs (all-critical-pairs eqns)]
+       [c-pairs (remove-duplicates
+                 (for/list ([cp c-pairs])
+                   (vars-to-symbols cp (lambda (i) (var i)))))])
+  ;; (print-rule expected)
+  ;; (printf "---------\n")
+  ;; (print-rule (vars-to-symbols c-pairs))
+  (check-equal? (list->set (vars-to-symbols c-pairs))
+                (list->set expected)))
+
+(let* ([eqns (rewrite-rules (x y z)
+               ((* (i x) (* x y)) -> y))]
+       [expected '(((* x0 x1) . (* (i (i x0)) x1))
+                   (x0 . x0))]
+       [c-pairs (all-critical-pairs eqns)]
+       [c-pairs (remove-duplicates
+                 (for/list ([cp c-pairs])
+                   (vars-to-symbols cp (lambda (i) (var i)))))])
+  ;; (print-eqn (vars-to-symbols c-pairs))
+  (check-equal? (list->set (vars-to-symbols c-pairs))
+                (list->set expected)))
+#+END_SRC
+
+A simple example from [[citet:BaaderTermrewritingall1999][Example 6.2.2]] is given in
+Listing [[all-critical-pairs-example]]:
+
 #+NAME: all-critical-pairs-example
-#+BEGIN_SRC scheme :eval yes :exports both :results value code
-(all-critical-pairs
- (rewrite-rules (x y z)
-                ((f (f x y) z) -> (f x (f y z)))
-                ((f (i x) x)  -> e)))
+#+BEGIN_SRC scheme :eval yes :exports both :results output code
+(let ([cpairs (all-critical-pairs
+        (rewrite-rules (x y z)
+          ((f (f x y) z) -> (f x (f y z)))
+          ((f (i x) x)  -> e)))])
+  (print-rule cpairs))
 #+END_SRC
 
 #+RESULTS: all-critical-pairs-example
 #+begin_src scheme
-(((f (i #(g4520)) (f #(g4520) #(g4519))) f e #(g4519)))
+	(f #(g884) (f #(g885) #(g886))) -> (f #(g884) (f #(g885) #(g886)))
+	(f (f #(g884) #(g885)) (f #(g886) #(g892))) -> (f (f #(g884) (f #(g885) #(g886))) #(g892))
+	(f (i #(g887)) (f #(g887) #(g892))) -> (f e #(g892))
+	e -> e
 #+end_src
-
-#+RESULTS: critical-pairs-tests
-#+BEGIN_SRC scheme :eval yes :exports none :results silent
-(let* ([x (var 0)]
-       [x1 (var 1)]
-       [x2 (var 2)]
-       [y (var 3)]
-       [y1 (var 4)]
-       [y2 (var 5)]
-       [rules `(((+ (s ,x) ,y) . ; ->
-                 (s (+ ,x ,y)))
-                ((+ ,x1 (s ,y1)) . ; ->
-                 (s (+ ,x1 ,y1)))
-                ((+ ,x2 ,y2) . ; ->
-                 (+ ,y2 ,x2)))]
-       [c-pairs (all-critical-pairs rules)])
-  (check-equal? c-pairs
-                `(((s (+ ,x2 ,y1)) + (s ,y1) ,x2)
-                  ((s (+ ,x ,y2)) + ,y2 (s ,x))
-                  ((s (+ ,x (s ,y1))) s (+ (s ,x) ,y1)))))
-#+END_SRC
 
 ** Orderings
 
@@ -557,18 +829,6 @@ well-suited for algebraic theories.
 Instead, we will use the standard lexicographical path order (LPO)
 [[citep:BaaderTermrewritingall1999][Example 5.4.12]].
 
-#+NAME: vars-helper-tests
-#+BEGIN_SRC scheme :eval yes :exports none :results silent
-(let ([v0 (var 0)]
-      [v1 (var 1)]
-      [v2 (var 2)]
-      [v3 (var 3)]
-      [v4 (var 4)])
-  (check-equal?
-   (vars `(f (g ,v0 x (,v0 ,v2 ,v3)) ,v1 (h (j (k ,v4) ,v3))))
-   (set v1 v3 v0 v4 v2)))
-#+END_SRC
-
 The LPO order will need an operator-symbol measure.  In other words, an
 order--possibly arbitrary--is imposed on function symbols like \(*\), \(f\),
 etc., considered together with their effective arities.
@@ -581,25 +841,22 @@ Our implementations roughly follow
 ;; Greater-than comparison of operator symbols against a given
 ;; ordering (implied by an ordered list containing all known operators)
 ;; and their arities--when applicable.
-(define op-gt
-  (lambda (op-list t1 t2)
-    (cond
-     [(and (symbol? t1) (symbol? t2))
-      (> (length (or (member t1 op-list)
-                     (error 'op-gt "op ~a not found." t1)))
-         (length (or (member t2 op-list)
-                     (error 'op-gt "op ~a not found." t2))))]
-     [(and (list? t1) (list? t2))
-      (let ([t1-rator (car t1)]
-            [t1-rands (cdr t1)]
-            [t2-rator (car t2)]
-            [t2-rands (cdr t2)])
-        (if (eq? t1-rator t2-rator)
-            (> (length t1-rands) (length t2-rands))
-            (> (length (or (member t1-rator op-list)
-                           (error 'op-gt "op ~a not found." t1-rator)))
-               (length (or (member t2-rator op-list)
-                           (error 'op-gt "op ~a not found." t2-rator))))))])))
+(define (op-gt op-list t1 t2)
+  (cond
+   [(and (symbol? t1) (symbol? t2))
+    (> (length (or (member t1 op-list)
+                   (error 'op-gt "op ~a not found." t1)))
+       (length (or (member t2 op-list)
+                   (error 'op-gt "op ~a not found." t2))))]
+   [(and (list? t1) (list? t2))
+    (match-let ([(cons t1-rator t1-rands) t1]
+                [(cons t2-rator t2-rands) t2])
+      (if (eq? t1-rator t2-rator)
+          (> (length t1-rands) (length t2-rands))
+          (> (length (or (member t1-rator op-list)
+                         (error 'op-gt "op ~a not found." t1-rator)))
+             (length (or (member t2-rator op-list)
+                         (error 'op-gt "op ~a not found." t2-rator))))))]))
 #+END_SRC
 
 #+NAME: op-gt-tests
@@ -617,18 +874,14 @@ Our implementations roughly follow
 #+NAME: lex-order
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref order-functions
 ;; Lexicographical extension of an order.
-(define lex-gt
-  (lambda (order t1 t2)
-    (if (and (pair? t1) (pair? t2))
-        (let ([t1-car (car t1)]
-              [t1-cdr (cdr t1)]
-              [t2-car (car t2)]
-              [t2-cdr (cdr t2)])
-          (if (order t1-car t2-car)
-           (eq? (length t1-cdr) (length t2-cdr))
-           (and (eq? t1-car t2-car)
-                (lex-eq order t1-cdr t2-cdr))))
-        #f)))
+(define (lex-gt order t1 t2)
+  (match* (t1 t2)
+    [((cons t1-car t1-cdr) (cons t2-car t2-cdr))
+     (if (order t1-car t2-car)
+         (eq? (length t1-cdr) (length t2-cdr))
+         (and (eq? t1-car t2-car)
+              (lex-gt order t1-cdr t2-cdr)))]
+    [(_ _) #f]))
 #+END_SRC
 
 #+NAME: lex-order-tests
@@ -642,49 +895,35 @@ Our implementations roughly follow
 #+NAME: lpo-orders
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref order-functions
 ;; Lexicographical path order.
-(define lpo-gt
-  (lambda (op-ord t1 t2)
-    ;; Constants are expressed as 0-arity functions--for consistency,
-    ;; so we transform symbols that represent them into S-expressions.
-    (let ([t1 (if (symbol? t1)
-                  (list t1)
-                  t1)]
-          [t2 (if (symbol? t2)
-                  (list t2)
-                  t2)])
-      (cond
-       [(var? t2)
-        (and (not (eq? t1 t2))
-             ;; FIXME: Seems pretty wasteful.  Some state would be good here?
-             (set-member? (vars t1) t2))]
-       ;; TODO: Ugh, just use `match' already!
-       [(and (list? t1) (list? t2))
-        (let ([t1-rator (car t1)]
-              [t2-rator (car t2)]
-              [t1-rands (cdr t1)]
-              [t2-rands (cdr t2)])
-          (or (ormap (lambda (x)
-                       (or (eq? x t2)
-                           (lpo-gt op-ord x t2)))
-                     t1-rands)
-              (and (andmap (curry lpo-gt op-ord t1) t2-rands)
-                   (or (op-ord t1-rator t2-rator)
-                       (and (eq? t1-rator t2-rator)
-                            (lex-gt (curry lpo-gt op-ord) t1-rands t2-rands))))))]
-       [else #f]))))
+(define (lpo-gt op-ord t1 t2)
+  ;; Constants are expressed as 0-arity functions--for consistency,
+  ;; so we transform symbols that represent them into S-expressions.
+  (let ([t1 (if (symbol? t1) (list t1) t1)]
+        [t2 (if (symbol? t2) (list t2) t2)])
+    (match* (t1 t2)
+            [(_ (? var? t2))
+               (and (not (eq? t1 t2))
+                    ;; FIXME: Seems pretty wasteful.  Some state would be good here?
+                    (set-member? (vars t1) t2))]
+            [((cons t1-rator t1-rands) (cons t2-rator t2-rands))
+             (or (ormap (lambda (x)
+                          (or (eq? x t2)
+                              (lpo-gt op-ord x t2)))
+                        t1-rands)
+                 (and (andmap (curry lpo-gt op-ord t1) t2-rands)
+                      (or (op-ord t1-rator t2-rator)
+                          (and (eq? t1-rator t2-rator)
+                               (lex-gt (curry lpo-gt op-ord) t1-rands t2-rands)))))]
+            [(_ _) #f])))
 
 ;; LPO's completion.
-(define lpo-ge
-  (lambda (op-ord t1 t2)
-    (or (eq? t1 t2)
-        (lpo-gt op-ord t1 t2))))
+(define (lpo-ge op-ord t1 t2)
+  (or (eq? t1 t2)
+      (lpo-gt op-ord t1 t2)))
 #+END_SRC
 
 #+NAME: lpo-orders-tests
-#+BEGIN_SRC scheme :eval yes :exports code :results none
-;; (require debug/repl)
-;; Use `(debug-repl)` and `(resume)'.
-
+#+BEGIN_SRC scheme :eval yes :exports code :results silent
 (check-false (lpo-gt (curry op-gt '(f g)) `(f) `(f)))
 (check-true (lpo-gt (curry op-gt '(f g)) `(f) `(g)))
 (check-false (lpo-gt (curry op-gt '(f g)) `(g) `(f)))
@@ -703,16 +942,18 @@ Our implementations roughly follow
   (check-true (lpo-gt op-gt `(f (f ,x ,y) ,z) `(f ,x (f ,y ,z)))))
 #+END_SRC
 
-:NOTES:
+:TODO:
 We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 :END:
 
 ** Completion
-*** Huet's Completion Procedure
+*** The Basic Completion Procedure
 
 #+NAME: normalize-and-orient
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref completion-functions
-(define (norm-orient ord rules eq)
+;; Normalize a pair (e.g. representing a relation) according to a set of
+;; replacement rules and return the car and cdr in the given term ordering.
+(define (normalize-oriented ord rules eq)
   (match eq
     [(cons s t)
      (let* ([-s (normalize rules s)]
@@ -723,34 +964,127 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
          (if s-gt-t
              (cons -s -t)
              (cons -t -s))]
-        [else (error 'orientation)]))]))
+        [else #f]))]))
 #+END_SRC
 
 #+NAME: normalize-and-orient-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
-(let* ([ord (curry lpo-gt '(* i 1))]
+(let* ([ord (curry lpo-gt (curry op-gt '(* i e)))]
        [rules (rewrite-rules (x y z)
-                ((* 1 x) -> x)
+                ((* e x) -> x)
                 ((* (* x y) z) -> (* x (* y z)))
-                ((* (i x) x) -> 1))]
+                ((* (i x) x) -> e))]
        [x (var (gensym))]
-       [l 1]
-       [r `(* (* 1 ,x) (i (* 1 ,x)))]
-       [eq `(,l . ,r)]
+       [eq-1 `(e . (* (* e ,x) (i (* e ,x))))]
        ;; We start with the standard group l -> r rules and
        ;; normalize + orient the following rule: (1 * x) -> (1 * x) * (1 * x)^{-1}.
        ;; First, this equation should reduce to the missing right inverse identity.
        ;; Second, the reduction order should be reversed (i.e. larger term to smaller term).
-       [res (norm-orient ord rules eq)])
-  (check-equal? res `((* ,x (i ,x)) . 1)))
-
+       [expected-1 `((* ,x (i ,x)) . e)])
+  (check-equal? (normalize-oriented ord rules eq-1) expected-1))
 #+END_SRC
 
-#+NAME: cp-completion
+#+NAME: basic-completion
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref completion-functions
-(define huet-completion
-  (lambda (idents ord)
-    ()))
+;; The basic completion algorithm with deferring for nonn-orientable equations
+;; from [[citet:HarrisonIntroductionlogicautomated2007][Chapter 4.7]].
+(define (-basic-completion ord eqs deferred cpairs max-iter iter)
+  (if (> iter max-iter)
+      (begin
+        (printf "reached max iters\n")
+        eqs)
+      (match cpairs
+        [(cons cp cpairs-cdr)
+         (begin
+           (printf "------completion-cons\ncp: ")
+           (print-eqn (list cp))
+           (printf "deferred: \n")
+           (print-rule deferred)
+           (printf "cpairs-cdr: \n")
+           (if (< (length cpairs-cdr) 20)
+               (print-eqn cpairs-cdr)
+               (printf "~a\n" (length cpairs-cdr)))
+           (printf "eqs: \n")
+           (if (< (length eqs) 20)
+               (print-eqn eqs)
+               (printf "~a\n" (length eqs)))
+           (let* ([cp-normed (normalize-oriented ord eqs cp)]
+                  [arg-list
+                   (begin
+                     (printf "cp-normed: \n")
+                     (if (eq? cp-normed #f)
+                         (begin
+                           (printf "false\n")
+                           ;; If orientation fails, defer the equation.
+                           (list eqs (cons cp deferred) cpairs-cdr
+                                 max-iter (+ 1 iter)))
+                         (match-let* ([(cons -s -t) cp-normed])
+                           (print-eqn (list cp-normed))
+                           (if (equal? -s -t)
+                               (begin
+                                 ;; This normal-ented critical pair reduces to
+                                 ;; the same terms (i.e. are joinable), so we
+                                 ;; discard it.
+                                 (printf "CP (i.e. cp-normed) joins\n")
+                                 (list eqs deferred cpairs-cdr
+                                       max-iter (+ 1 iter)))
+                               ;; Since the normal-ented critical pair didn't join, we
+                               ;; add it to our list of rewrite rules and compute the
+                               ;; critical pairs resulting from it and all the other rules.
+                               (let* ([new-eqs (cons cp-normed eqs)]
+                                      [new-cpairs (dropf
+                                                   ;; (critical-pairs cp-normed new-eqs)
+                                                   (append-map
+                                                    (lambda (x)
+                                                      (append
+                                                       (critical-pairs cp-normed (list x))
+                                                       ;; Include transposed pair
+                                                       (if (not (equal? cp-normed x))
+                                                           (critical-pairs x (list cp-normed))
+                                                           '())))
+                                                    new-eqs)
+                                                   (lambda (x) (equal? (car x) (cdr x))))])
+                                 (printf "new-cpairs: \n")
+                                 (if (< (length new-cpairs) 20)
+                                     (print-eqn new-cpairs)
+                                     (printf "~a\n" (length new-cpairs)))
+                                 (list new-eqs deferred (set-union new-cpairs cpairs-cdr)
+                                       max-iter (+ 1 iter)))))))])
+             (apply -basic-completion ord arg-list)))]
+        [_
+         (if (eq? deferred '())
+             ;; No more deferred equations, so we're done.
+             eqs
+             (begin
+               (printf "------completion-non-cons\neqs: \n")
+               (if (< (length eqs) 20)
+                   (print-eqn eqs)
+                   (printf "~a\n" (length eqs)))
+               (printf "deferred: \n") (print-eqn deferred)
+               (printf "cpairs: \n") (if (< (length cpairs) 20)
+                                         (print-eqn cpairs)
+                                         (printf "~a\n" (length cpairs)))
+               (let ([e (ormap (curry normalize-oriented ord eqs) deferred)])
+                 ;; TODO: Describe condition
+                 (-basic-completion ord eqs (remove e deferred) '(e) max-iter (+ 1 iter)))))])))
+
+(define (basic-completion ord eqs [max-iter 10] [iter 0])
+  (-basic-completion ord eqs '() (remove-duplicates (all-critical-pairs eqs)) max-iter iter))
+#+END_SRC
+
+#+NAME: basic-completion-tests
+#+BEGIN_SRC scheme :eval never :exports none :results silent
+(let* ([ord (curry lpo-gt (curry op-gt '(i e *)))]
+       [eqns (rewrite-rules (x y z)
+               ((* e x) -> x)
+               ((* (* x y) z) -> (* x (* y z)))
+               ((* (i x) x) -> e))]
+       ;; [crits (all-critical-pairs eqns)]
+       [res (basic-completion ord eqns)]
+       )
+  (print-rule res)
+  ;; (print-rule (for/list ([x crits]) (vars-to-symbols x)))
+  )
 #+END_SRC
 
 * miniKanren Integrations
@@ -966,5 +1300,5 @@ The relations implemented here traverse graphs and apply other relations recursi
 
 # Local Variables:
 # geiser-scheme-implementation: racket
-# eval: (progn (put 'rewrite-rules 'scheme-indent-function 1) (put 'fresh 'scheme-indent-function 1))
+# eval: (cl-loop for x in '(rewrite-rules fresh match*) do (put x 'scheme-indent-function 1))
 # End:
