@@ -996,7 +996,7 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
       (match cpairs
         [(cons cp cpairs-cdr)
          (begin
-           (printf "------completion-cons\ncp: ")
+           (printf "------completion-cons (~a)\ncp: " iter)
            (print-eqn (list cp))
            (printf "deferred: \n")
            (print-rule deferred)
@@ -1022,28 +1022,25 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
                            (print-eqn (list cp-normed))
                            (if (equal? -s -t)
                                (begin
-                                 ;; This normal-ented critical pair reduces to
-                                 ;; the same terms (i.e. are joinable), so we
+                                 ;; This normalized & oriented critical pair reduces to
+                                 ;; the same two terms (i.e. they're joinable), so we
                                  ;; discard it.
                                  (printf "CP (i.e. cp-normed) joins\n")
                                  (list eqs deferred cpairs-cdr
                                        max-iter (+ 1 iter)))
-                               ;; Since the normal-ented critical pair didn't join, we
+                               ;; Since the normalized & oriented critical pair didn't join, we
                                ;; add it to our list of rewrite rules and compute the
                                ;; critical pairs resulting from it and all the other rules.
                                (let* ([new-eqs (cons cp-normed eqs)]
-                                      [new-cpairs (dropf
-                                                   ;; (critical-pairs cp-normed new-eqs)
-                                                   (append-map
-                                                    (lambda (x)
-                                                      (append
-                                                       (critical-pairs cp-normed (list x))
-                                                       ;; Include transposed pair
-                                                       (if (not (equal? cp-normed x))
-                                                           (critical-pairs x (list cp-normed))
-                                                           '())))
-                                                    new-eqs)
-                                                   (lambda (x) (equal? (car x) (cdr x))))])
+                                      [new-cpairs (append-map
+                                                   (lambda (x)
+                                                     (append
+                                                      (critical-pairs cp-normed (list x))
+                                                      ;; Include transposed pair
+                                                      (if (not (equal? cp-normed x))
+                                                          (critical-pairs x (list cp-normed))
+                                                          '())))
+                                                   new-eqs)])
                                  (printf "new-cpairs: \n")
                                  (if (< (length new-cpairs) 20)
                                      (print-eqn new-cpairs)
@@ -1056,7 +1053,7 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
              ;; No more deferred equations, so we're done.
              eqs
              (begin
-               (printf "------completion-non-cons\neqs: \n")
+               (printf "------completion-non-cons (~a)\neqs: \n" iter)
                (if (< (length eqs) 20)
                    (print-eqn eqs)
                    (printf "~a\n" (length eqs)))
@@ -1068,23 +1065,30 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
                  ;; TODO: Describe condition
                  (-basic-completion ord eqs (remove e deferred) '(e) max-iter (+ 1 iter)))))])))
 
-(define (basic-completion ord eqs [max-iter 10] [iter 0])
+(define (basic-completion ord eqs [max-iter 1000] [iter 0])
   (-basic-completion ord eqs '() (remove-duplicates (all-critical-pairs eqs)) max-iter iter))
 #+END_SRC
 
 #+NAME: basic-completion-tests
-#+BEGIN_SRC scheme :eval never :exports none :results silent
-(let* ([ord (curry lpo-gt (curry op-gt '(i e *)))]
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
        [eqns (rewrite-rules (x y z)
                ((* e x) -> x)
                ((* (* x y) z) -> (* x (* y z)))
                ((* (i x) x) -> e))]
-       ;; [crits (all-critical-pairs eqns)]
-       [res (basic-completion ord eqns)]
-       )
-  (print-rule res)
-  ;; (print-rule (for/list ([x crits]) (vars-to-symbols x)))
-  )
+       [res (basic-completion ord eqns)])
+  ;; (print-rule
+  ;;  (sort (for/list ([x res]) (vars-to-symbols x (lambda (i) (var i))))
+  ;;        (lambda (x y) (ord (car x) (car y)))))
+  ;; We should have distributivity of inverses (i.e. `i'):
+  ;; (printf "normalize test (distribute inverse): ~a\n"
+  ;;         (normalize res `(i (* (* (* y z) u) y))))
+  ;; (printf "normalize test (distribute and negate inverse): ~a\n"
+  ;;         (normalize res `(i (* (i (* (* (* y z) u) y)) q))))
+  (check-equal? (normalize res
+                           `(* (i (* x (i x)))
+                             (* (i (* (i (* (* y z) u)) y)) (i u))))
+               'z))
 #+END_SRC
 
 * miniKanren Integrations
