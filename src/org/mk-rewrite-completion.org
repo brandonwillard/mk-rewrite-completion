@@ -25,16 +25,15 @@ Consider the following subset of group axiom identities--specifically, inverse e
 identity elements, and associativity:
 \begin{equation}
   \begin{aligned}
-    1 \cdot x &= x
+    e \cdot x &= x
     \\
-    x^{-1} \cdot x &= 1
+    x^{-1} \cdot x &= e
     \\
     (x \cdot y) \cdot z &= x \cdot (y \cdot z)
   \;.
   \end{aligned}
   \label{eq:group-axioms}
 \end{equation}
-
 
 In miniKanren [[citep:ByrdRelationalProgrammingminiKanren2009]], we can produce
 a uni-directional rewrite relation based on [[Cref:eq:group-axioms]] as
@@ -49,24 +48,26 @@ follows:
   (lambda (a b)
     (conde
      ((fresh (x)
-        (== a `(* 1 ,x))
+        (== a `(* e ,x))
         (== b x)))
      ((fresh (x)
         (== a `(* (i ,x) ,x))
-        (== b 1)))
+        (== b 'e)))
      ((fresh (x y z)
         (== a `(* (* ,x ,y) ,z))
         (== b `(* ,x (* ,y ,z))))))))
 #+END_SRC
 
 When accompanied by a relation, src_scheme{graph-applyo}, that traverses forms,
-reduction relations will produce every applicable reduction--as shown in
+reduction relations will produce every applicable reduction--as shown in Listing
 [[mk-algebra-rewrite-example-1]].
-If the rewrite rules adhere to a reduction order, then we may be able to
-identify some normal forms in the output (e.g. src_scheme{1}).  Otherwise, we
-find intermediate reductions in the output of [[mk-algebra-rewrite-example-1]],
-which implicitly show the src_scheme{conde} branches that produced successful
-goals in src_scheme{reduces}.
+If the rewrite rules adhere to a reduction order, then we should eventually see
+some normal (i.e. irreducible) forms among the output of successful goals.  At
+those points, the src_scheme{conde} branches in the
+underlying src_scheme{graph-applyo} recursions should be exhausted and the goal
+streams end.  The remaining successful goals produce non-normal (i.e. further
+reducible) forms.  We can see all of these cases in the output of Listing
+[[mk-algebra-rewrite-example-1]].
 #+NAME: mk-algebra-rewrite-example-1
 #+BEGIN_SRC scheme :eval yes :exports both :results output code :noweb strip-export
 (display (pretty-format
@@ -78,35 +79,37 @@ goals in src_scheme{reduces}.
 #+RESULTS: mk-algebra-rewrite-example-1
 #+begin_src scheme
 ((* (i x) (* x y))
- (* 1 y)
+ (* e y)
  y)
 #+end_src
 
-In [[mk-algebra-rewrite-example-defs]] we only considered the rewrite rules implied
-by left-to-right substitutions in the more general equations of
-[[Cref:eq:group-axioms]].  Outside of the miniKanren context and under the
-same rewrite rules, we obtain the following normal form for \((x^{-1} \cdot x) \cdot y\)
-through repeated application of the same rewrite rules in order (see
-[[citep:HarrisonIntroductionlogicautomated2007][Chapter 4.7]] and
-[[citep:BaaderTermrewritingall1999][Chapter 1]]):.
+:REMARK:
+Outside of the miniKanren context and under the same rewrite rules, in Listing
+[[group-normalize-order-1-example]] we obtain the same results as Listing
+[[mk-algebra-rewrite-example-1]], except that the intermediate reductions are not
+shown and only the normal form is returned.
 #+NAME: group-normalize-order-1-example
 #+BEGIN_SRC scheme :eval yes :exports both :results value code :noweb strip-export
 <<scheme-setup>>
 <<rewrite-functions>>
 
 (let ([rules (rewrite-rules (x y z)
-                            ((* (* x y) z) -> (* x (* y z)))
-                            ((* 1 x) -> x)
-                            ((* (i x) x) -> 1))])
-  (normalize '(* (* (i x) x) y) rules))
+               ((* (* x y) z) -> (* x (* y z)))
+               ((* e x) -> x)
+               ((* (i x) x) -> e))])
+  (normalize rules '(* (* (i x) x) y)))
 #+END_SRC
 
 #+RESULTS: group-normalize-order-1-example
 #+begin_src scheme
+y
 #+end_src
+:END:
 
-It just so happens that our left-to-right rewrite rule interpretation of [[Cref:eq:group-axioms]]
-does reduce terms, and--as a result--can produce normal forms.
+In [[mk-algebra-rewrite-example-defs]] we only considered the rewrite rules for
+left-to-right substitutions implied by the equations of [[Cref:eq:group-axioms]].
+It just so happens that this set of rewrite rules actually does reduce terms,
+and--as a result--can produce normal forms.
 
 Now, consider the normal form for \((x \cdot x^{-1}) \cdot y\); as with our
 example above, it should be \(y\).  Our naively derived rewrite
@@ -121,7 +124,7 @@ in more restricted forms, we will produce a non-terminating rewrite system.
 In a more general context, we need a means of automatically deriving rewrite
 rules with normalization and confluence guarantees.  These properties are also required
 for type checking relations and other rewrite-driven operations that,
-say, determine the validity of statements like "Is \(x \cdot x^{-1} = 1\) also
+say, determine the validity of statements like "Is \(x \cdot x^{-1} = e\) also
 true/valid under [[Cref:eq:group-axioms]]?".  Knuth-Bendix completion is one such
 approach, and it works by producing a set of "complete" rewrite rules for a
 given set of equations.
@@ -130,21 +133,21 @@ For example, a complete set of rewrite rules for [[Cref:eq:group-axioms]] is giv
 by the following:
 \begin{equation}
   \begin{aligned}
-    1 \cdot x &\to x
+    e \cdot x &\to x
     \\
-    x^{-1} \cdot x &\to 1
+    x^{-1} \cdot x &\to e
     \\
     (x \cdot y) \cdot z &\to x \cdot (y \cdot z)
     \\
     x^{-1} \cdot (x \cdot y) &\to y
     \\
-    1^{-1} &\to 1
+    e^{-1} &\to e
     \\
-    x \cdot 1 &\to x
+    x \cdot e &\to x
     \\
     (x^{-1})^{-1} &\to x
     \\
-    x \cdot x^{-1} &\to 1
+    x \cdot x^{-1} &\to e
     \\
     x \cdot (x^{-1} \cdot y) &\to y
     \\
@@ -160,7 +163,6 @@ completion (e.g. Huet's procedure).  As we can see, the commutative inverse
 identity (i.e. \(x^{-1} \cdot x = x \cdot x^{-1}\)) is present in a form that
 preserves termination, along with other important rewrites that we might have
 easily missed when attempting to manually produce a complete set of rules.
-
 
 miniKanren implements a complete search [[citep:HemannSimpleCompleteSearch2018,
 Hemannsmallembeddinglogic2016]], which alongside lazily evaluated results, can
@@ -212,15 +214,18 @@ miniKanren implementations.
 (require racket/pretty)
 (require minikanren)
 
+;; Include un-`provided` core functions.
+(require/expose minikanren/minikanren (unify var var? reify walk*))
+#+END_SRC
+
+#+NAME: kanren-requires-debug
+#+BEGIN_SRC scheme :eval yes :exports none :results silent :noweb-ref scheme-setup
 ;; For interactive debugging, try `raco pkg install debug` and the following:
 ;; (require debug/repl)
 ;; Then use `(debug-repl)` and `(resume)'.
 
 ;; Similarly...
 (require errortrace)
-
-;; Include un-`provided` core functions.
-(require/expose minikanren/minikanren (unify var var? reify walk*))
 #+END_SRC
 
 :TODO:
@@ -345,16 +350,16 @@ ignore src_scheme{var} and swap out/ground variables effortlessly.
 #+END_SRC
 :END:
 
-The macros in [[rewrite-macros]] make it easier to specify a set of rewrite
-rules through the following syntax:
+The macros in [[rewrite-macros]] make it easier to specify a set of rewrite rules
+through the following syntax:
 #+NAME: rewrite-macro-usage
 #+BEGIN_SRC scheme :eval never :exports code :results none
 (rewrite-rules (x y)
-               ((f (g x x) y) -> (g x y))
-               ((g x y) -> x))
+  ((f (g x x) y) -> (g x y))
+  ((g x y) -> x))
 #+END_SRC
 
-Listing [[rewrite-macro-usage]] expands to the following:
+Listing [[rewrite-macro-usage]] expands into something like the following:
 #+NAME: rewrite-macro-expanded
 #+BEGIN_SRC scheme :eval never :exports code :results none
 '(list
@@ -395,37 +400,22 @@ Listing [[rewrite-macro-usage]] expands to the following:
            (cdr r-pair)
            graph))]))
 
+;; Produce quoted forms each with a set of specified fresh logic variables.
+(define-syntax (fresh-forms stx)
+  (syntax-case stx ()
+    [(_ (x ...) t)
+     #`(replace-in-graph `((x . ,(var (gensym))) ...) (quote t))]
+    [(_ (x ...) t ...)
+     #`(list (fresh-forms (x ...) t) ...)]))
+
 (define-syntax (rewrite-rules stx)
   (syntax-case stx (->)
     [(_ (x ...) (l -> r) ...)
-     #`(list
-        (let ([xv `((x . ,(var (gensym))) ...)])
-          (replace-in-graph xv (quote (l . r)))) ...)]))
-#+END_SRC
+     #`(fresh-forms (x ...) (l . r) ...)]))
 
-#+NAME: rewrite-macros-tests
-#+BEGIN_SRC scheme :eval yes :exports none :results silent
-(match-let ([(list v0 v1 v2 v3 v4)
-             (for/list ([v (range 5)]) (var v))])
-  (check-equal?
-   (vars `(f (g ,v0 x (,v0 ,v2 ,v3)) ,v1 (h (j (k ,v4) ,v3))))
-   (set v1 v3 v0 v4 v2)))
-
-(check-true (let ([q (car (rewrite-rules (x y) (x -> x)))])
-              (eq? (car q) (cdr q))))
-#+END_SRC
-
-The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a form.
-Specifically, the function src_scheme{normalize} attempts to produce a
-fixed-point/normalized result through repeated application of the rewrite rules.
-
-#+ATTR_LATEX: :float t :placement h!
-#+CAPTION:
-#+NAME: rewrite-helper-functions
-#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
 ;; Convert vars in a graph according to a function taking a number assigned to
 ;; each var observed (in order).
-(define (vars-to-symbols x [fn (lambda (i) (string->symbol (format "x~a" i)))])
+(define (transform-vars x [fn (lambda (i) (string->symbol (format "x~a" i)))])
   (let* ([x-vars (vars x '())]
          [new-vars (for/list ([v x-vars]
                               [i (range (set-count x-vars))])
@@ -461,7 +451,36 @@ fixed-point/normalized result through repeated application of the rewrite rules.
                       (cons (cdr v) (car v)))])
     ;; Un-ground the grounded vars.
     (replace-in-graph rev-alist t-new)))
+#+END_SRC
 
+#+NAME: rewrite-macros-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(match-let ([(list v0 v1 v2 v3 v4)
+             (for/list ([v (range 5)]) (var v))])
+  (check-equal?
+   (vars `(f (g ,v0 x (,v0 ,v2 ,v3)) ,v1 (h (j (k ,v4) ,v3))))
+   (set v1 v3 v0 v4 v2)))
+
+(match-let* ([(list (cons x_11 x_12) (cons x_21 x_22))
+              (fresh-forms (x) (x . x) (x . x))])
+  ;; Logic variables for equal symbols within a form should be equivalent
+  (check-eq? x_11 x_12)
+  (check-eq? x_21 x_22)
+  ;; Across forms they shouldn't be
+  (check-not-eq? x_11 x_21))
+
+#+END_SRC
+
+* Term Rewriting
+
+The functions in Listing [[rewrite-helper-functions]] apply rewrite rules to a term graph.
+Specifically, the function src_scheme{normalize} attempts to produce a
+fixed-point/normalized result through repeated application of the rewrite rules.
+
+#+ATTR_LATEX: :float t :placement h!
+#+CAPTION:
+#+NAME: rewrite-helper-functions
+#+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref rewrite-functions
 ;; Apply a single rewrite rule or `#f`.
 (define (rewrite-1 t lr)
   (if (var? t)
@@ -502,14 +521,15 @@ fixed-point/normalized result through repeated application of the rewrite rules.
                      (-normalize rules t-new-new)))))))]
     [_ t]))
 
-(define (normalize rules t)
-  (apply-on-grounded (curry -normalize rules) t))
-
 (define (rewrite rules t)
   (let ([res (apply-on-grounded (curry -rewrite rules) t)])
     (if (eq? res #f)
         t
         res)))
+
+(define (normalize rules t)
+  (apply-on-grounded (curry -normalize rules) t))
+
 #+END_SRC
 
 #+NAME: rewrite-helper-functions-tests
@@ -552,7 +572,6 @@ fixed-point/normalized result through repeated application of the rewrite rules.
               '(+ 1 1))
 #+END_SRC
 
-* Rewrite Rule Completion
 ** Critical Pairs
 Following [[citet:BaaderTermrewritingall1999]] Definition 6.2.1,
 #+ATTR_LATEX: :options [Critical Pairs]
@@ -564,6 +583,13 @@ unifier of \(l_1 \mid_{p} =^{?} l_2\) s.t. \(l_1 \mid_{p}\) is not a variable, t
 \(l_i \to r_i\) determine a *critical pair*
 \({\langle \theta r_1, \left(\theta l_1\right)\left[\theta r_2\right]_p \rangle}\).
 #+END_definition
+
+Non-trivial critical pairs reflect a type of "critical overlap" between rewrite rules
+that may lead to non-confluence.  For this reason, if we want to prove
+confluence--or derive a set of confluent rewrite rules--we can focus exclusively
+on the finitely many critical pairs generated by a set of rewrite rules.
+We're given these properties of critical pairs through the Critical Pair lemma and theorem
+[[citet:BaaderTermrewritingall1999][6.2.3 and 6.2.4, respectively]].
 
 The functions in Listing [[critical-pairs-functions]] compute the critical pairs between
 two rewrite rules.
@@ -618,7 +644,7 @@ two rewrite rules.
 
 (define (critical-pairs rule1 rule2)
   (match-let* (;; Make sure that variables in rules don't overlap.
-               [rule-new (vars-to-symbols rule1 (lambda (i) (var (gensym))))]
+               [rule-new (transform-vars rule1 (lambda (i) (var (gensym))))]
                [(cons l1 r1) rule-new]
                [match-res (walk-matches l1 rule2 '())])
     (for/list ([m match-res])
@@ -641,31 +667,6 @@ set of rewrite rules.
 
 #+RESULTS: critical-pairs-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent :noweb yes
-;; Expected "raw" critical pairs:
-;; 1 (+ x1 x0) -> (+ x1 x0)
-;; 2 (+ (s x1) x0) -> (s (+ x0 x1))
-;; 2 (+ (s x1) x0) -> (s (+ x0 x1))
-;; 3 (+ x1 (s x0)) -> (s (+ x0 x1))
-;; 3 (+ x1 (s x0)) -> (s (+ x0 x1))
-;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
-;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
-;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
-;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
-;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
-;; 7 (s (+ x0 x1)) -> (+ x1 (s x0))
-;; 7 (s (+ x0 x1)) -> (+ x1 (s x0))
-;; 8 (s (+ x0 (s x1))) -> (s (+ (s x0) x1))
-;; 8 (s (+ x0 (s x1))) -> (s (+ (s x0) x1))
-;; ---------
-;; 1 (+ x0 x1) -> (+ x0 x1)
-;; 2 (+ (s x0) x1) -> (s (+ x1 x0))
-;; 3 (+ x0 (s x1)) -> (s (+ x1 x0))
-;; 4 (s (+ x0 x1)) -> (+ (s x1) x0)
-;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
-;; 5 (s (+ x0 x1)) -> (s (+ x0 x1))
-;; 6 (s (+ (s x0) x1)) -> (s (+ x0 (s x1)))
-;; 7 (s (+ x1 x0)) -> (+ x0 (s x1))
-;; 8 (s (+ x1 (s x0))) -> (s (+ (s x1) x0))
 (let* ([expected
         '(((+ x0 x1) . (+ x0 x1))
           ((+ (s x0) x1) . (s (+ x1 x0)))
@@ -682,37 +683,9 @@ set of rewrite rules.
        [c-pairs (all-critical-pairs rules)]
        [c-pairs (remove-duplicates
                  (for/list ([cp c-pairs])
-                   (vars-to-symbols cp (lambda (i) (var i)))))])
-  (check-equal? (list->set (vars-to-symbols c-pairs))
+                   (transform-vars cp (lambda (i) (var i)))))])
+  (check-equal? (list->set (transform-vars c-pairs))
                 (list->set expected)))
-
-;; These are the critical pairs and their respective inputs:
-;; [((* e x0) . x0), ((* e x0) . x0)]:	[x0, x0]
-;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* e x0) . x0)]:	[(* e (* x0 x1)), (* x0 x1)]
-;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (* x0 x1) x2) * x0 (* x1 x2))]:	[(* (* x0 x1) (* x2 x3)), (* (* x0 (* x1 x2)) x3)]
-;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (* x0 x1) x2) * x0 (* x1 x2))]:	[(* x0 (* x1 x2)), (* x0 (* x1 x2))]
-;; [((* (* x0 x1) x2) * x0 (* x1 x2)), ((* (i x0) x0) . e)]:	[(* (i x0) (* x0 x1)), (* e x0)]
-;; [((* (i x0) x0) . e), ((* (i x0) x0) . e)]:	[e, e]
-;; (let ([x0 (var 0)]
-;;       [x1 (var 1)])
-;;   (critical-pairs '((* e x0) . x0) '((* e x0) . x0)))
-;; Generated from:
-;; (let* ([eqns (rewrite-rules (x y z)
-;;                ((* e x) -> x)
-;;                ((* (* x y) z) -> (* x (* y z)))
-;;                ((* (i x) x) -> e))]
-;;        [pairs (cartesian-product eqns eqns)])
-;;   (for ([p pairs])
-;;     (match-let* ([(list r1 r2) p])
-;;       (for ([cps (critical-pairs r1 r2)])
-;;         (match cps
-;;           [(cons cp1 cp2)
-;;            (printf "[~a, ~a]:\t[~a, ~a]\n"
-;;                    (vars-to-symbols r1)
-;;                    (vars-to-symbols r2)
-;;                    (vars-to-symbols cp1)
-;;                    (vars-to-symbols cp2))]
-;;           [_ (printf "none\n")])))))
 
 (let* ([eqns (rewrite-rules (x y z)
                ((* e x) -> x)
@@ -732,11 +705,8 @@ set of rewrite rules.
        [c-pairs (all-critical-pairs eqns)]
        [c-pairs (remove-duplicates
                  (for/list ([cp c-pairs])
-                   (vars-to-symbols cp (lambda (i) (var i)))))])
-  ;; (print-rule expected)
-  ;; (printf "---------\n")
-  ;; (print-rule (vars-to-symbols c-pairs))
-  (check-equal? (list->set (vars-to-symbols c-pairs))
+                   (transform-vars cp (lambda (i) (var i)))))])
+  (check-equal? (list->set (transform-vars c-pairs))
                 (list->set expected)))
 
 (let* ([eqns (rewrite-rules (x y z)
@@ -746,9 +716,8 @@ set of rewrite rules.
        [c-pairs (all-critical-pairs eqns)]
        [c-pairs (remove-duplicates
                  (for/list ([cp c-pairs])
-                   (vars-to-symbols cp (lambda (i) (var i)))))])
-  ;; (print-eqn (vars-to-symbols c-pairs))
-  (check-equal? (list->set (vars-to-symbols c-pairs))
+                   (transform-vars cp (lambda (i) (var i)))))])
+  (check-equal? (list->set (transform-vars c-pairs))
                 (list->set expected)))
 #+END_SRC
 
@@ -761,14 +730,14 @@ Listing [[all-critical-pairs-example]]:
         (rewrite-rules (x y z)
           ((f (f x y) z) -> (f x (f y z)))
           ((f (i x) x)  -> e)))])
-  (print-rule cpairs))
+  (print-rule (map transform-vars cpairs)))
 #+END_SRC
 
 #+RESULTS: all-critical-pairs-example
 #+begin_src scheme
-	(f #(g884) (f #(g885) #(g886))) -> (f #(g884) (f #(g885) #(g886)))
-	(f (f #(g884) #(g885)) (f #(g886) #(g892))) -> (f (f #(g884) (f #(g885) #(g886))) #(g892))
-	(f (i #(g887)) (f #(g887) #(g892))) -> (f e #(g892))
+	(f x0 (f x1 x2)) -> (f x0 (f x1 x2))
+	(f (f x0 x1) (f x2 x3)) -> (f (f x0 (f x1 x2)) x3)
+	(f (i x0) (f x0 x1)) -> (f e x1)
 	e -> e
 #+end_src
 
@@ -947,6 +916,30 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 :END:
 
 ** Completion
+
+As we mentioned earlier, a naively derived set of rewrite rules \(\mathcal{R}\)
+(e.g. left-to-right replacements) may easily be insufficient for the purpose of
+fully representing a system of equations/identities, \(\approx_{E}\), and its
+logical consequences (e.g. right inverses in the group axioms).  This is where
+completion comes in.
+
+Starting with a simple set of rewrite rules, the classical
+approach to completion [[citep:KnuthSimplewordproblems1983]] produces a
+confluent, terminating set of rewrite rules--when possible.  This is done by
+recursively generating and normalizing the critical pairs resulting from a
+running set of rewrite rules and adding distinct pairs as new rewrite rules.
+When all the distinct critical pairs are exhausted, the resulting rule set is
+confluent.
+
+The addition of new rewrite rules derived from the generated critical pairs is
+arguable the key step.  This step reflects both the intent to derive a confluent
+system and the notion that a given (sub)set of rewrite rules only partially
+model--syntactically--the semantics behind a set of equations.
+Birkhoff's Theorem [[citep:BaaderTermrewritingall1999][Theorem 3.5.14]] gives
+the connection between rewrite rules \(\mathcal{R} \subset \xleftrightarrow{*}_{E}\) and
+relations \(\approx_{E}\).
+
+
 *** The Basic Completion Procedure
 
 #+NAME: normalize-and-orient
@@ -991,41 +984,41 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 (define (-basic-completion ord eqs deferred cpairs max-iter iter)
   (if (> iter max-iter)
       (begin
-        (printf "reached max iters\n")
+        ;; (printf "reached max iters\n")
         eqs)
       (match cpairs
         [(cons cp cpairs-cdr)
          (begin
-           (printf "------completion-cons (~a)\ncp: " iter)
-           (print-eqn (list cp))
-           (printf "deferred: \n")
-           (print-rule deferred)
-           (printf "cpairs-cdr: \n")
-           (if (< (length cpairs-cdr) 20)
-               (print-eqn cpairs-cdr)
-               (printf "~a\n" (length cpairs-cdr)))
-           (printf "eqs: \n")
-           (if (< (length eqs) 20)
-               (print-eqn eqs)
-               (printf "~a\n" (length eqs)))
+           ;; (printf "------completion-cons (~a)\ncp: " iter)
+           ;; (print-eqn (list cp))
+           ;; (printf "deferred: \n")
+           ;; (print-rule deferred)
+           ;; (printf "cpairs-cdr: \n")
+           ;; (if (< (length cpairs-cdr) 20)
+           ;;     (print-eqn cpairs-cdr)
+           ;;     (printf "~a\n" (length cpairs-cdr)))
+           ;; (printf "eqs: \n")
+           ;; (if (< (length eqs) 20)
+           ;;     (print-eqn eqs)
+           ;;     (printf "~a\n" (length eqs)))
            (let* ([cp-normed (normalize-oriented ord eqs cp)]
                   [arg-list
                    (begin
-                     (printf "cp-normed: \n")
+                     ;; (printf "cp-normed: \n")
                      (if (eq? cp-normed #f)
                          (begin
-                           (printf "false\n")
+                           ;; (printf "false\n")
                            ;; If orientation fails, defer the equation.
                            (list eqs (cons cp deferred) cpairs-cdr
                                  max-iter (+ 1 iter)))
                          (match-let* ([(cons -s -t) cp-normed])
-                           (print-eqn (list cp-normed))
+                           ;; (print-eqn (list cp-normed))
                            (if (equal? -s -t)
                                (begin
                                  ;; This normalized & oriented critical pair reduces to
                                  ;; the same two terms (i.e. they're joinable), so we
                                  ;; discard it.
-                                 (printf "CP (i.e. cp-normed) joins\n")
+                                 ;; (printf "CP (i.e. cp-normed) joins\n")
                                  (list eqs deferred cpairs-cdr
                                        max-iter (+ 1 iter)))
                                ;; Since the normalized & oriented critical pair didn't join, we
@@ -1041,10 +1034,10 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
                                                           (critical-pairs x (list cp-normed))
                                                           '())))
                                                    new-eqs)])
-                                 (printf "new-cpairs: \n")
-                                 (if (< (length new-cpairs) 20)
-                                     (print-eqn new-cpairs)
-                                     (printf "~a\n" (length new-cpairs)))
+                                 ;; (printf "new-cpairs: \n")
+                                 ;; (if (< (length new-cpairs) 20)
+                                 ;;     (print-eqn new-cpairs)
+                                 ;;     (printf "~a\n" (length new-cpairs)))
                                  (list new-eqs deferred (set-union new-cpairs cpairs-cdr)
                                        max-iter (+ 1 iter)))))))])
              (apply -basic-completion ord arg-list)))]
@@ -1053,14 +1046,14 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
              ;; No more deferred equations, so we're done.
              eqs
              (begin
-               (printf "------completion-non-cons (~a)\neqs: \n" iter)
-               (if (< (length eqs) 20)
-                   (print-eqn eqs)
-                   (printf "~a\n" (length eqs)))
-               (printf "deferred: \n") (print-eqn deferred)
-               (printf "cpairs: \n") (if (< (length cpairs) 20)
-                                         (print-eqn cpairs)
-                                         (printf "~a\n" (length cpairs)))
+               ;; (printf "------completion-non-cons (~a)\neqs: \n" iter)
+               ;; (if (< (length eqs) 20)
+               ;;     (print-eqn eqs)
+               ;;     (printf "~a\n" (length eqs)))
+               ;; (printf "deferred: \n") (print-eqn deferred)
+               ;; (printf "cpairs: \n") (if (< (length cpairs) 20)
+               ;;                           (print-eqn cpairs)
+               ;;                           (printf "~a\n" (length cpairs)))
                (let ([e (ormap (curry normalize-oriented ord eqs) deferred)])
                  ;; TODO: Describe condition
                  (-basic-completion ord eqs (remove e deferred) '(e) max-iter (+ 1 iter)))))])))
@@ -1072,60 +1065,194 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 #+NAME: basic-completion-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
 (let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
-       [eqns (rewrite-rules (x y z)
-               ((* e x) -> x)
-               ((* (* x y) z) -> (* x (* y z)))
-               ((* (i x) x) -> e))]
+       [eqns (fresh-forms (x y z)
+               ((* e x) . x)
+               ((* (* x y) z) . (* x (* y z)))
+               ((* (i x) x) . e))]
        [res (basic-completion ord eqns)])
-  ;; (print-rule
-  ;;  (sort (for/list ([x res]) (vars-to-symbols x (lambda (i) (var i))))
-  ;;        (lambda (x y) (ord (car x) (car y)))))
-  ;; We should have distributivity of inverses (i.e. `i'):
-  ;; (printf "normalize test (distribute inverse): ~a\n"
-  ;;         (normalize res `(i (* (* (* y z) u) y))))
-  ;; (printf "normalize test (distribute and negate inverse): ~a\n"
-  ;;         (normalize res `(i (* (i (* (* (* y z) u) y)) q))))
   (check-equal? (normalize res
                            `(* (i (* x (i x)))
                              (* (i (* (i (* (* y z) u)) y)) (i u))))
                'z))
 #+END_SRC
 
-* miniKanren Integrations
-
-Certain uses of miniKanren reflect term-rewriting in such a way as to benefit
-from the rewrite rule completion.
-
-In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
-rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
-following:
-#+ATTR_LATEX: :float t :placement h!
-#+CAPTION:
-#+NAME: conde-pattern-form
-#+BEGIN_SRC scheme :eval never :results none :exports src
-(fresh (l r)
-  (conde
-   ;; l_1 -> r_1
-   ((== l L1)
-    (== r R1))
-   ;; l_2 -> r_2
-   ((== l L2)
-    (== r R2))
-   ;;...
-   ))
+In [[basic-completion-group-example]], we run the standard completion procedure
+against the group axioms in Cref:eq:group-axioms.
+#+NAME: basic-completion-group-example
+#+BEGIN_SRC scheme :eval yes :exports both :results output code
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
+       [eqns (fresh-forms (x y z)
+               ((* e x) . x)
+               ((* (* x y) z) . (* x (* y z)))
+               ((* (i x) x) . e))]
+       [rules (basic-completion ord eqns)])
+  (print-rule (map transform-vars rules)))
 #+END_SRC
 
-When the src_scheme{conde} forms are intercepted by a macro, one can parse the
-branches and extract implicit rewrite rules.  This step could be performed in an
-operator specifically for defining rewrite rules, or as a generalized miniKanren
-"compilation" step that reasons about arbitrary forms in the unevaluated
-miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
-potential \(l_i \to r_i\) rules).
+#+RESULTS: basic-completion-group-example
+#+begin_src scheme
+	(i (* x0 x1)) -> (* (i x1) (i x0))
+	(* x0 (* x1 (* x2 (i (* x0 (* x1 x2)))))) -> e
+	(* (i (* x0 x1)) x2) -> (* (i x1) (* (i x0) x2))
+	(* x0 (* x1 (* x2 (* (i (* x0 (* x1 x2))) x3)))) -> x3
+	(i (* (i x0) (i x1))) -> (* x1 x0)
+	(i e) -> e
+	(* (i (* x0 (i x1))) (* x0 x2)) -> (* x1 x2)
+	(* (i e) x0) -> x0
+	(* (i (* x0 (i x1))) x0) -> x1
+	(* x0 (* x1 (* (i (* x0 x1)) x2))) -> x2
+	(* (i (* x0 x1)) (* x0 (* x1 x2))) -> x2
+	(* x0 (* (i x0) x1)) -> x1
+	(i (i x0)) -> x0
+	(* x0 (i x0)) -> e
+	(* x0 e) -> x0
+	(* (i (i x0)) x1) -> (* x0 x1)
+	(* (i x0) (* x0 x1)) -> x1
+	(* e x0) -> x0
+	(* (* x0 x1) x2) -> (* x0 (* x1 x2))
+	(* (i x0) x0) -> e
+#+end_src
+
+Listing [[basic-completion-group-rewrite-example]] applies the rewrite rules to
+produce the normal form of a non-trivial term.  To fully reduce the example term, one
+needs rewrite rules that cover derived properties like right-inverses and the
+involution of inverses.
+#+NAME: basic-completion-group-rewrite-example
+#+BEGIN_SRC scheme :eval yes :exports both :results value code
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
+       [eqns (fresh-forms (x y z)
+               ((* e x) . x)
+               ((* (* x y) z) . (* x (* y z)))
+               ((* (i x) x) . e))]
+       [rules (basic-completion ord eqns)])
+  (normalize rules
+             `(* (i (* x (i x)))
+                 (* (i (* (i (* (* y z) u)) y)) (i u)))))
+#+END_SRC
+
+#+RESULTS: basic-completion-group-rewrite-example
+#+begin_src scheme
+z
+#+end_src
+
+The results of Listing [[basic-completion-group-example]] aren't the same as
+[[Cref:eq:group-completion]]; this is due to redundancies that can be reduced by
+inter-reduction.
+
+*** Interreduction
+
+
+TODO
+* miniKanren Integrations
+
+Having demonstrated rewrite rule completion, we return to miniKanren and
+reconsider the example in Listing [[mk-algebra-rewrite-example-defs]].
+
+Instead, if we tried to reduce the example term in Listing
+[[basic-completion-group-rewrite-example]] using only the same initial rewrite
+rules--this time expressed as relations--we would find that its relational
+counterpart in miniKanren is also unable to reduce the term.
+We demonstrate this in Listing [[mk-algebra-rewrite-example-revisited]].
+
+#+NAME: mk-algebra-rewrite-example-revisited
+#+BEGIN_SRC scheme :eval yes :exports both :results output code :noweb strip-export
+<<cp-functions>>
+<<order-functions>>
+<<completion-functions>>
+<<mk-algebra-rewrite-example-defs>>
+<<rewrite-rules-relation-macro>>
+
+(display (pretty-format
+          (run* (q) (graph-applyo reduces
+                                  '(*
+                                    (i (* x (i x)))
+                                    (*
+                                     (i (* (i (* (* y z) u)) y))
+                                     (i u)))
+                                  q))
+          40
+          #:mode 'display))
+#+END_SRC
+
+#+RESULTS: mk-algebra-rewrite-example-revisited
+#+begin_src scheme
+((*
+  (i (* x (i x)))
+  (*
+   (i (* (i (* y (* z u))) y))
+   (i u))))
+#+end_src
+
+Now, in Listing [[mk-algebra-completed-relation]], we try the reduction using the
+completed rule set.
+#+NAME: mk-algebra-completed-relation
+#+BEGIN_SRC scheme :eval yes :exports code :results silent
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
+       [eqns (fresh-forms (x y z)
+                          ((* e x) . x)
+                          ((* (* x y) z) . (* x (* y z)))
+                          ((* (i x) x) . e))]
+       [rules (map transform-vars (basic-completion ord eqns))])
+  (eval `(define (reduces-completed l r)
+           (rewrite-ruleso
+            l r
+            (x0 x1 x2 x3)
+            ,@(map (lambda (x)
+                     ;; XXX TODO: This won't work because every non-logic variable
+                     ;; symbol needs to be quoted.
+                     (match x [(cons l r) `(,l -> ,r)]))
+                   rules)))))
+#+END_SRC
+
+#+NAME: mk-algebra-completed-example
+#+BEGIN_SRC scheme :eval never-export :exports both :results output code :noweb strip-export
+(display (pretty-format
+          (run* (q) (graph-applyo reduces-completed
+                                  '(*
+                                    (i (* x (i x)))
+                                    (*
+                                     (i (* (i (* (* y z) u)) y))
+                                     (i u)))
+                                  q))
+          40
+          #:mode 'display))
+#+END_SRC
+
+:TODO:
+Use the output of [[basic-completion-group-example]] to generate new src_scheme{conde}
+rewrite rules.
+:END:
+
+# In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
+# rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
+# following:
+# #+ATTR_LATEX: :float t :placement h!
+# #+CAPTION:
+# #+NAME: conde-pattern-form
+# #+BEGIN_SRC scheme :eval never :results none :exports src
+# (fresh (l r)
+#   (conde
+#    ;; l_1 -> r_1
+#    ((== l L1)
+#     (== r R1))
+#    ;; l_2 -> r_2
+#    ((== l L2)
+#     (== r R2))
+#    ;;...
+#    ))
+# #+END_SRC
+#
+# When the src_scheme{conde} forms are intercepted by a macro, one can parse the
+# branches and extract implicit rewrite rules.  This step could be performed in an
+# operator specifically for defining rewrite rules, or as a generalized miniKanren
+# "compilation" step that reasons about arbitrary forms in the unevaluated
+# miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
+# potential \(l_i \to r_i\) rules).
 
 ** Graph Relations
 The relations implemented here traverse graphs and apply other relations recursively.
 #+NAME: mk-graph-relations
-#+BEGIN_SRC scheme :eval yes :exports none :results silent :noweb-ref graph-relations
+#+BEGIN_SRC scheme :eval yes :exports code :results silent :noweb-ref graph-relations
 (define lapply-anyo
   (lambda (func l-in l-out)
     (letrec ((-lapply
@@ -1160,7 +1287,6 @@ The relations implemented here traverse graphs and apply other relations recursi
         (conde
          ((== i-rdc g-out))
          ((graph-applyo func i-rdc g-out))))))))
-
 #+END_SRC
 
 #+NAME: mk-graph-relations-tests
@@ -1266,17 +1392,18 @@ The relations implemented here traverse graphs and apply other relations recursi
                 (+ (+ _.0 _.0) (+ _.0 _.0))))
 #+END_SRC
 
-** Rewrite Relations
+** Rewrite Relations                                              :noexport:
 
-#+NAME: rule-operator
+#+NAME: rewrite-rules-relation-macro
 #+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax rewrite-rules
-  (syntax-rules (->)
-    ((_ (q ...) (l -> r) ...)
-      ;; TODO: Call a function above that produces the critical pairs.
-      ;; The output should ultimately be a set of "completed"
-      ;; `conde' rewrite rules?
-      `((,l ,r) ...))))
+(define-syntax (rewrite-ruleso stx)
+  (syntax-case stx (->)
+    [(_ l-var r-var (x ...) (l -> r) ...)
+     #'(conde
+        [(fresh (x ...)
+           (== l-var l)
+           (== r-var r))]
+        ...)]))
 #+END_SRC
 
 #+NAME: rule-extractor
