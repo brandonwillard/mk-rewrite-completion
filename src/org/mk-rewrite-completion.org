@@ -106,7 +106,7 @@ y
 #+end_src
 :END:
 
-In [[mk-algebra-rewrite-example-defs]] we only considered the rewrite rules for
+In Listing [[mk-algebra-rewrite-example-defs]] we only considered the rewrite rules for
 left-to-right substitutions implied by the equations of [[Cref:eq:group-axioms]].
 It just so happens that this set of rewrite rules actually does reduce terms,
 and--as a result--can produce normal forms.
@@ -917,19 +917,25 @@ We could also implement Knuth-Bendix orderings (i.e. using weight functions).
 
 ** Completion
 
-As we mentioned earlier, a naively derived set of rewrite rules \(\mathcal{R}\)
+As we mentioned earlier, a naively derived set of rewrite rules \(R\)
 (e.g. left-to-right replacements) may easily be insufficient for the purpose of
 fully representing a system of equations/identities, \(\approx_{E}\), and its
 logical consequences (e.g. right inverses in the group axioms).  This is where
 completion comes in.
 
-Starting with a simple set of rewrite rules, the classical
-approach to completion [[citep:KnuthSimplewordproblems1983]] produces a
-confluent, terminating set of rewrite rules--when possible.  This is done by
-recursively generating and normalizing the critical pairs resulting from a
-running set of rewrite rules and adding distinct pairs as new rewrite rules.
-When all the distinct critical pairs are exhausted, the resulting rule set is
-confluent.
+Starting with a simple set of identities, \(E_0\), and a reduction order, \(>\),
+the classical approach to completion [[citep:KnuthSimplewordproblems1983]]
+produces a confluent, terminating set of rewrite rules, \(R\)--when possible.
+More generally, a completion procedure, \(\mathcal{C}\),
+[[citep:BaaderTermrewritingall1999][Definition 7.2.3]] produces a sequence
+\(\left(E_0, R_0\right) \vdash_{\mathcal{C}} \left(E_1, R_1\right) \dots \) that
+may converge to \(\left(\emptyset, R_N = R\right)\) for some number of iterations,
+\(N\).
+
+Simply put, the procedure generates and normalizes critical pairs resulting from
+a running set of rewrite rules and adds distinct pairs as new rewrite rules;
+otherwise, it removes critical pairs that reduce to equivalent terms.  When all
+the critical pairs are exhausted, the resulting rule set is confluent.
 
 The addition of new rewrite rules derived from the generated critical pairs is
 arguable the key step.  This step reflects both the intent to derive a confluent
@@ -939,18 +945,17 @@ Birkhoff's Theorem [[citep:BaaderTermrewritingall1999][Theorem 3.5.14]] gives
 the connection between rewrite rules \(\mathcal{R} \subset \xleftrightarrow{*}_{E}\) and
 relations \(\approx_{E}\).
 
-
 *** The Basic Completion Procedure
 
 #+NAME: normalize-and-orient
 #+BEGIN_SRC scheme :eval yes :exports code :results none :noweb-ref completion-functions
-;; Normalize a pair (e.g. representing a relation) according to a set of
-;; replacement rules and return the car and cdr in the given term ordering.
-(define (normalize-oriented ord rules eq)
+;; Normalize an equation/identity according to a set of replacement rules and
+;; return the car and cdr in the given term ordering.
+(define (normalize-oriented ord eqs eq)
   (match eq
     [(cons s t)
-     (let* ([-s (normalize rules s)]
-            [-t (normalize rules t)]
+     (let* ([-s (normalize eqs s)]
+            [-t (normalize eqs t)]
             [s-gt-t (ord -s -t)])
        (cond
         [(boolean? s-gt-t)
@@ -963,14 +968,14 @@ relations \(\approx_{E}\).
 #+NAME: normalize-and-orient-tests
 #+BEGIN_SRC scheme :eval yes :exports none :results silent
 (let* ([ord (curry lpo-gt (curry op-gt '(* i e)))]
-       [rules (rewrite-rules (x y z)
-                ((* e x) -> x)
-                ((* (* x y) z) -> (* x (* y z)))
-                ((* (i x) x) -> e))]
+       [rules (fresh-forms (x y z)
+                ((* e x) . x)
+                ((* (* x y) z) . (* x (* y z)))
+                ((* (i x) x) . e))]
        [x (var (gensym))]
        [eq-1 `(e . (* (* e ,x) (i (* e ,x))))]
-       ;; We start with the standard group l -> r rules and
-       ;; normalize + orient the following rule: (1 * x) -> (1 * x) * (1 * x)^{-1}.
+       ;; We start with the standard group l ~ r identities and
+       ;; normalize + orient the following: (1 * x) ~ (1 * x) * (1 * x)^{-1}.
        ;; First, this equation should reduce to the missing right inverse identity.
        ;; Second, the reduction order should be reversed (i.e. larger term to smaller term).
        [expected-1 `((* ,x (i ,x)) . e)])
@@ -1076,7 +1081,7 @@ relations \(\approx_{E}\).
                'z))
 #+END_SRC
 
-In [[basic-completion-group-example]], we run the standard completion procedure
+In Listing [[basic-completion-group-example]], we run the standard completion procedure
 against the group axioms in Cref:eq:group-axioms.
 #+NAME: basic-completion-group-example
 #+BEGIN_SRC scheme :eval yes :exports both :results output code
@@ -1137,22 +1142,101 @@ z
 
 The results of Listing [[basic-completion-group-example]] aren't the same as
 [[Cref:eq:group-completion]]; this is due to redundancies that can be reduced by
-inter-reduction.
+interreduction.
 
 *** Interreduction
 
+Per [[citep:BaaderTermrewritingall1999]], a term-rewriting system is *interreduced*
+when each \(r\) in \(l \to r \in R\) is irreducible in \(R\) and \(l\) is irreducible
+in \(R - \{l \to r\}\).
 
-TODO
-* miniKanren Integrations
+#+NAME: interreduction
+#+BEGIN_SRC scheme :eval never :exports code :results none :noweb-ref completion-functions
+(define (interreduce rules [rules-rdcd '()])
+  (match rules
+    [(cons (cons l r) tail-rules)
+     (let* ([all-rules (append rules-rdcd tail-rules)]
+            ;; Attempt to reduce the left-hand side wrt. the fully reduced set
+            ;; (i.e. `rules-rdc') and the remaining rules (i.e. `rules').
+            [l-rdcd (normalize all-rules l)])
+       ;; TODO: Would be better to use a `-normalize' that
+       ;; returns `#f' when there are no replacements.
+       ;; See the TODOs in those functions.
+       (if (equal? l-rdcd l)
+           ;; Left-hand side reduces; add this rule to the finished set
+           ;; (alongside a potentially reduced right-hand side).
+           (interreduce tail-rules
+                        (cons
+                         (cons l (normalize (append rules rules-rdcd) r))
+                         rules-rdcd))
+           ;; Left-hand side doesn't reduce; drop this rule and continue.
+           (interreduce tail-rules rules-rdcd)))]
+    [_ (reverse rules-rdcd)]))
+#+END_SRC
+
+#+NAME: interreduction-tests
+#+BEGIN_SRC scheme :eval yes :exports none :results silent
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
+       [eqns (fresh-forms (x y z)
+                          ((* e x) . x)
+                          ((* (* x y) z) . (* x (* y z)))
+                          ((* (i x) x) . e))]
+       [rules (basic-completion ord eqns)]
+       [rdcd-rules (interreduce rules)])
+  (print-rule (map transform-vars rdcd-rules))
+  (check-equal? (list->set (map transform-vars rdcd-rules))
+                (list->set '(((i (* x0 x1)) . (* (i x1) (i x0)))
+                             ((i (i x0)) . x0)
+                             ((i e) . e)
+                             ((* x0 (i x0)) . e)
+                             ((* x0 (* (i x0) x1)) . x1)
+                             ((* x0 e) . x0)
+                             ((* (i x0) (* x0 x1)) . x1)
+                             ((* e x0) . x0)
+                             ((* (i x0) x0) . e)
+                             ((* (* x0 x1) x2) . (* x0 (* x1 x2)))))))
+#+END_SRC
+
+
+Listing [[interreduction-group-example]] applies interreduction to the completion
+results of the group axioms in [[Cref:eq:group-axioms]].  After interreduction, the
+results match the replacement rules in [[Cref:eq:group-completion]].
+#+NAME: interreduction-group-example
+#+BEGIN_SRC scheme :eval never-export :exports both :results output code :noweb strip-export
+(let* ([ord (curry lpo-ge (curry op-gt '(i * e)))]
+       [eqns (fresh-forms (x y z)
+                          ((* e x) . x)
+                          ((* (* x y) z) . (* x (* y z)))
+                          ((* (i x) x) . e))]
+       [rules (basic-completion ord eqns)]
+       [rdcd-rules (interreduce rules)])
+  (print-rule (map transform-vars rdcd-rules)))
+#+END_SRC
+
+#+RESULTS: interreduction-group-example
+#+begin_src scheme
+	(i (* x0 x1)) -> (* (i x1) (i x0))
+	(i e) -> e
+	(* x0 (* (i x0) x1)) -> x1
+	(i (i x0)) -> x0
+	(* x0 (i x0)) -> e
+	(* x0 e) -> x0
+	(* (i x0) (* x0 x1)) -> x1
+	(* e x0) -> x0
+	(* (* x0 x1) x2) -> (* x0 (* x1 x2))
+	(* (i x0) x0) -> e
+#+end_src
+
+* Term Rewriting in miniKanren
 
 Having demonstrated rewrite rule completion, we return to miniKanren and
 reconsider the example in Listing [[mk-algebra-rewrite-example-defs]].
 
 Instead, if we tried to reduce the example term in Listing
-[[basic-completion-group-rewrite-example]] using only the same initial rewrite
-rules--this time expressed as relations--we would find that its relational
-counterpart in miniKanren is also unable to reduce the term.
-We demonstrate this in Listing [[mk-algebra-rewrite-example-revisited]].
+[[basic-completion-group-rewrite-example]] using only the same initial left-to-right
+rewrite rules--this time expressed as relations--we would find that its
+relational counterpart in miniKanren is also unable to reduce the term (as
+expected).  We demonstrate this in Listing [[mk-algebra-rewrite-example-revisited]].
 
 #+NAME: mk-algebra-rewrite-example-revisited
 #+BEGIN_SRC scheme :eval yes :exports both :results output code :noweb strip-export
@@ -1219,38 +1303,16 @@ completed rule set.
 #+END_SRC
 
 :TODO:
-Use the output of [[basic-completion-group-example]] to generate new src_scheme{conde}
+Use the output of Listing [[basic-completion-group-example]] to generate new src_scheme{conde}
 rewrite rules.
+
+The completion procedure can be stated as a set of inference rules
+[[citep:BaaderTermrewritingall1999][Figure 7.2]] and it may be possible to
+implement them as relations in miniKanren.
 :END:
 
-# In the miniKanren DSL, constructs like src_scheme{conde} can implicitly specify a set of
-# rewrite rules \(\mathcal{R}\).  The general pattern of these rules is given by the
-# following:
-# #+ATTR_LATEX: :float t :placement h!
-# #+CAPTION:
-# #+NAME: conde-pattern-form
-# #+BEGIN_SRC scheme :eval never :results none :exports src
-# (fresh (l r)
-#   (conde
-#    ;; l_1 -> r_1
-#    ((== l L1)
-#     (== r R1))
-#    ;; l_2 -> r_2
-#    ((== l L2)
-#     (== r R2))
-#    ;;...
-#    ))
-# #+END_SRC
-#
-# When the src_scheme{conde} forms are intercepted by a macro, one can parse the
-# branches and extract implicit rewrite rules.  This step could be performed in an
-# operator specifically for defining rewrite rules, or as a generalized miniKanren
-# "compilation" step that reasons about arbitrary forms in the unevaluated
-# miniKanren DSL (e.g. traverse src_scheme{fresh} and src_scheme{conde} forms for
-# potential \(l_i \to r_i\) rules).
-
-** Graph Relations
-The relations implemented here traverse graphs and apply other relations recursively.
+** Identities and Rewrite Relations
+The relations implemented in Listing [[mk-graph-relations]] traverse graphs and apply other relations recursively.
 #+NAME: mk-graph-relations
 #+BEGIN_SRC scheme :eval yes :exports code :results silent :noweb-ref graph-relations
 (define lapply-anyo
@@ -1392,33 +1454,19 @@ The relations implemented here traverse graphs and apply other relations recursi
                 (+ (+ _.0 _.0) (+ _.0 _.0))))
 #+END_SRC
 
-** Rewrite Relations                                              :noexport:
-
-#+NAME: rewrite-rules-relation-macro
-#+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax (rewrite-ruleso stx)
-  (syntax-case stx (->)
-    [(_ l-var r-var (x ...) (l -> r) ...)
-     #'(conde
-        [(fresh (x ...)
-           (== l-var l)
-           (== r-var r))]
-        ...)]))
-#+END_SRC
-
-#+NAME: rule-extractor
-#+BEGIN_SRC scheme :eval never :exports none :results none
-(define-syntax extract-rewrite-rules
-  (syntax-rules ()
-    ((_ (conde
-         ((== l x) ...))
-        ;; TODO: Collect `(== l ...)` and `(== r ...)` pairs in
-        ;; branches to form rewrite rules.  Maybe even replace/unique-ify
-        ;; the involved logic variables.
-     (`((,x ,y) ...)))))
-#+END_SRC
+** Critcial Pair Relations
+:TODO:
+How could we formulate a relation for critical pairs?
+Start from the DEDUCE rule?
+:END:
 
 * Discussion
+
+Some open questions arising from this material:
+- In this way, it may also be possible to produce the completion sequence, \(\left(E_i, R_i\right)\), as a goal stream
+and perhaps make productive use of lazily evaluated, non-terminating/convergent
+sequences.  **In other words, can a miniKanren implementation of the inference
+rules produce on-line/streaming completion?**
 
 :TODO:
 - Summarize results
